@@ -1,0 +1,42 @@
+# FastAPI & Uvicorn
+fastapi
+uvicorn[standard]
+
+# Database
+sqlalchemy
+psycopg2-binary
+alembic
+
+# Data Validation
+pydantic
+pydantic-settings
+
+# CSV & File Handling
+python-multipart
+
+# Email
+sendgrid
+
+# AI APIs
+openai
+anthropic
+
+# Environment variables
+python-dotenv
+
+# Utilities
+python-dateutil
+requests
+
+# Logging
+python-json-logger
+
+# CORS
+fastapi-cors
+
+# HTTP/HTTPS
+httpx
+
+# Testing (optional)
+pytest
+pytest-asyncio
