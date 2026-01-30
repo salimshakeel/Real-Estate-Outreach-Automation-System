@@ -119,15 +119,19 @@ async def config_check():
 
 
 # ============================================
-# INCLUDE ROUTERS (will add as we build them)
+# INCLUDE ROUTERS
 # ============================================
-# from app.routers import leads, campaigns, dashboard, templates, webhooks
-# 
-# app.include_router(leads.router, prefix="/api/leads", tags=["Leads"])
-# app.include_router(campaigns.router, prefix="/api/campaigns", tags=["Campaigns"])
-# app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
-# app.include_router(templates.router, prefix="/api/templates", tags=["Templates"])
-# app.include_router(webhooks.router, prefix="/api/webhooks", tags=["Webhooks"])
+from app.routers.leads import router as leads_router
+from app.routers.templates import router as templates_router
+from app.routers.campaigns import router as campaigns_router
+
+app.include_router(leads_router, prefix="/api/leads", tags=["Leads"])
+app.include_router(templates_router, prefix="/api/templates", tags=["Templates"])
+app.include_router(campaigns_router, prefix="/api/campaigns", tags=["Campaigns"])
+
+# Coming soon:
+# from app.routers.dashboard import router as dashboard_router
+# app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"])
 
 
 # ============================================

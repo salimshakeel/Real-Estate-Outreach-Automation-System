@@ -11,6 +11,7 @@ alembic
 # Data Validation
 pydantic
 pydantic-settings
+email-validator
 
 # CSV & File Handling
 python-multipart
