@@ -125,11 +125,13 @@ from app.routers.leads import router as leads_router
 from app.routers.templates import router as templates_router
 from app.routers.campaigns import router as campaigns_router
 from app.routers.dashboard import router as dashboard_router
+from app.routers.demo import router as demo_router
 
 app.include_router(leads_router, prefix="/api/leads", tags=["Leads"])
 app.include_router(templates_router, prefix="/api/templates", tags=["Templates"])
 app.include_router(campaigns_router, prefix="/api/campaigns", tags=["Campaigns"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["Dashboard"])
+app.include_router(demo_router, prefix="/api/demo", tags=["Demo"])
 
 
 # ============================================
