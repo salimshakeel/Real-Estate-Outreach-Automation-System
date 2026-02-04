@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # ============================================
     # CORS - Frontend URLs allowed to access API
     # ============================================
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173,https://real-estate-outreach-frontend.onrender.com"
     
     # ============================================
     # SENDGRID - Email Service (Optional for demo)
