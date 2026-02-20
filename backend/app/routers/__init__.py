@@ -1,6 +1,4 @@
-"""
-API Routers
-"""
+
 
 from app.routers.leads import router as leads_router
 from app.routers.templates import router as templates_router
