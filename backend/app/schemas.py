@@ -8,7 +8,6 @@ from datetime import datetime
 # ============================================
 
 class MessageResponse(BaseModel):
-    """Standard message response"""
     message: str
     success: bool = True
 
