@@ -1,5 +1,5 @@
 # Real-Estate-Outreach-Automation-System
-# 🏠 Real Estate Outreach Automation System
+
 
 An intelligent, automated email outreach platform designed specifically for real estate agents to contact FSBO (For Sale By Owner) sellers, track responses, classify interest levels using AI, and automatically schedule meetings.
 

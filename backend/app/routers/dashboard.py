@@ -53,9 +53,9 @@ async def get_dashboard_stats(
 
 async def get_stats(db: AsyncSession) -> DashboardStats:
     """Calculate all dashboard statistics"""
-    
+    #HELLO WORLD
     # Time boundaries
-    now = datetime.utcnow()
+    now = datetime.utcnow(0
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=today_start.weekday())
     
