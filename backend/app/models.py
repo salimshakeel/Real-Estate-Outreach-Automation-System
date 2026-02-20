@@ -94,6 +94,11 @@ class Lead(Base):
         back_populates="lead", 
         cascade="all, delete-orphan"
     )
+    sms_messages = relationship(
+        "SmsMessage",
+        back_populates="lead",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -247,4 +252,41 @@ class ChatbotMessage(Base):
     __table_args__ = (
         Index("idx_chatbot_messages_lead_id", "lead_id"),
         Index("idx_chatbot_messages_created_at", "created_at"),
+    )
+
+
+# ============================================
+# TABLE 8: SMS_MESSAGES (DEPENDS ON: leads)
+# ============================================
+class SmsMessage(Base):
+    __tablename__ = "sms_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lead_id = Column(
+        Integer,
+        ForeignKey("leads.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    to_number = Column(String(20), nullable=False)  # E.164
+    body = Column(Text, nullable=False)
+    status = Column(String(50), default="pending", server_default=text("'pending'"))
+    twilio_sid = Column(String(255), nullable=True)  # Twilio Message SID for status callbacks
+    sent_at = Column(DateTime, nullable=True)
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    lead = relationship("Lead", back_populates="sms_messages")
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'sent', 'delivered', 'failed', 'undelivered')",
+            name="sms_messages_status_check"
+        ),
+        Index("idx_sms_messages_lead_id", "lead_id"),
+        Index("idx_sms_messages_status", "status"),
+        Index("idx_sms_messages_created_at", "created_at"),
+        Index("idx_sms_messages_twilio_sid", "twilio_sid"),
     )

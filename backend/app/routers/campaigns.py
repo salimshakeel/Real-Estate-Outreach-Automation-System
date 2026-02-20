@@ -322,6 +322,7 @@ async def start_campaign(
     for lead in leads:
         # Convert lead to dict for personalization
         lead_data = {
+            "lead_id": lead.id,
             "first_name": lead.first_name,
             "last_name": lead.last_name or "",
             "email": lead.email,
@@ -335,25 +336,31 @@ async def start_campaign(
         personalized_subject = EmailService.personalize_template(subject, lead_data)
         personalized_body = EmailService.personalize_template(body, lead_data)
         
-        # Send email
-        send_result = await email_service.send_email(
-            to_email=lead.email,
-            subject=personalized_subject,
-            body=personalized_body
-        )
-        
-        # Create email sequence record
+        # Create email sequence record FIRST so we have an ID for tracking
         email_sequence = EmailSequence(
             lead_id=lead.id,
             sequence_day=1,
             email_subject=personalized_subject,
             email_body=personalized_body,
-            status="sent" if send_result.get("success") else "bounced",
-            sent_at=datetime.utcnow() if send_result.get("success") else None,
-            sendgrid_message_id=send_result.get("message_id"),
-            bounce_reason=send_result.get("error") if not send_result.get("success") else None
+            status="pending",   # Will be updated to "sent" by send_campaign_email()
         )
         db.add(email_sequence)
+        await db.flush()  # Gets us the sequence.id without committing the transaction
+        
+        # Send email — saves message_id back to the sequence row automatically
+        # This is what makes webhook event tracking work.
+        send_result = await email_service.send_campaign_email(
+            to_email=lead.email,
+            subject=personalized_subject,
+            body=personalized_body,
+            sequence_id=email_sequence.id,  # Links the message_id back to this row
+            db=db
+        )
+        
+        # Update sequence status if send failed
+        if not send_result.get("success"):
+            email_sequence.status = "bounced"
+            email_sequence.bounce_reason = send_result.get("error", "Send failed")[:255]
         
         # Update lead status
         if send_result.get("success"):

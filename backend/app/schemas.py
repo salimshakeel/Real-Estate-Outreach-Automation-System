@@ -405,6 +405,45 @@ class CSVUploadResponse(BaseModel):
 
 
 # ============================================
+# CHATBOT SCHEMAS
+# ============================================
+
+class ChatMessage(BaseModel):
+    """Single chat message in a conversation"""
+    role: str  # "user" | "assistant" | "system"
+    content: str
+
+
+class ChatbotRequest(BaseModel):
+    """Request from frontend chat widget to chatbot API"""
+    lead_id: int
+    messages: List[ChatMessage]
+    lead_score: Optional[int] = None
+    industry: Optional[str] = None
+    source: Optional[str] = None  # e.g. "email_open", "email_click", "manual"
+    last_email_summary: Optional[str] = None
+
+
+class ChatbotNextAction(BaseModel):
+    """What the system should do after this bot reply"""
+    type: str  # "continue" | "book_meeting" | "escalate_human" | "end"
+    reason: Optional[str] = None  # short, system-facing explanation
+
+
+class ChatbotResponse(BaseModel):
+    """Chatbot response returned to frontend"""
+    reply: str
+    next_action: ChatbotNextAction
+    updated_lead_score: Optional[int] = None
+
+
+class ChatbotHistoryResponse(BaseModel):
+    """Full chatbot history for a lead"""
+    lead_id: int
+    messages: List[ChatMessage]
+
+
+# ============================================
 # SEND EMAIL SCHEMAS
 # ============================================
 
@@ -438,3 +477,46 @@ class SendBulkEmailResponse(BaseModel):
     sent: int
     failed: int
     results: List[SendEmailResponse]
+
+
+# ============================================
+# SMS SCHEMAS (Step 3)
+# ============================================
+
+class SmsSendRequest(BaseModel):
+    """Request to send SMS to a lead"""
+    lead_id: int
+    body: str = Field(..., min_length=1, max_length=1600)
+    personalize: bool = True  # Replace {{first_name}}, etc. with lead data
+
+
+class SmsSendResponse(BaseModel):
+    """Response after sending SMS"""
+    success: bool
+    lead_id: int
+    sms_message_id: Optional[int] = None
+    twilio_sid: Optional[str] = None
+    status: str  # "sent" | "mock" | "failed"
+    error: Optional[str] = None
+    message: str
+
+
+class SmsMessageResponse(BaseModel):
+    """Single SMS record for history"""
+    id: int
+    lead_id: int
+    to_number: str
+    body: str
+    status: str
+    twilio_sid: Optional[str] = None
+    sent_at: Optional[datetime] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SmsHistoryResponse(BaseModel):
+    """SMS history for a lead"""
+    lead_id: int
+    messages: List[SmsMessageResponse]
