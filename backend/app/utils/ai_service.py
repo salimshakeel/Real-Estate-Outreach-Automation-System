@@ -1,11 +1,4 @@
-"""
-AI Service
-Wrapper around LLM provider(s) used across the system.
 
-For now this implements a simple chatbot reply generator that:
-- Uses configuration flags to decide if a real LLM is available
-- Falls back to a safe, rule-based response in demo mode
-"""
 
 from typing import Dict, List, Any, Optional
 import json
