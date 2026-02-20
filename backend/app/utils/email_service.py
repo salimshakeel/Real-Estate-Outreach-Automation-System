@@ -85,22 +85,7 @@ _daily_limiter = DailySendLimiter()
 # ============================================
 
 class EmailService:
-    """
-    Email sending service with mock and SendGrid modes.
 
-    Quick usage guide:
-        # For campaign sends (use this — tracks in DB):
-        result = await email_service.send_campaign_email(
-            to_email=lead.email,
-            subject=subject,
-            body=body,
-            sequence_id=sequence.id,
-            db=db
-        )
-
-        # For one-off sends (no DB tracking):
-        result = await email_service.send_email(to, subject, body)
-    """
 
     # ----------------------------------------
     # TEMPLATE PERSONALIZATION
