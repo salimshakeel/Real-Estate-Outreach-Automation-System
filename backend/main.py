@@ -144,9 +144,7 @@ app.include_router(sms_router, prefix="/api/sms", tags=["SMS"])
 app.include_router(sendgrid_webhook_router, prefix="/webhooks", tags=["Webhooks"])
 
 
-# ============================================
-# RUN SERVER
-# ============================================
+
 if __name__ == "__main__":
     import uvicorn
     
