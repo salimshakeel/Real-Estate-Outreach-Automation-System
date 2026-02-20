@@ -47,12 +47,31 @@ class Settings(BaseSettings):
     SENDGRID_FROM_EMAIL: Optional[str] = None
     SENDGRID_FROM_NAME: str = "Real Estate Outreach"
     
+    # Webhook security: shared secret appended to webhook URL as ?secret=VALUE
+    # Generate with: openssl rand -hex 32
+    # Set your SendGrid webhook URL to:
+    #   https://your-domain.com/webhooks/sendgrid/events?secret=THIS_VALUE
+    SENDGRID_WEBHOOK_SECRET: Optional[str] = None
+    
+    # Email warming: max emails sent per day (resets at UTC midnight).
+    # Warmup schedule: Week 1 = 100, Week 2 = 250, Week 3 = 500, Week 4+ = 1000
+    # Set to 0 for unlimited (only after domain is warmed).
+    SENDGRID_DAILY_SEND_LIMIT: int = 100
+    
     # ============================================
     # OPENAI - AI Classification (Optional for demo)
     # ============================================
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL: str = "gpt-3.5-turbo"
     
+    # ============================================
+    # TWILIO - SMS (Step 3; same vendor as SendGrid)
+    # ============================================
+    TWILIO_ACCOUNT_SID: Optional[str] = None
+    TWILIO_AUTH_TOKEN: Optional[str] = None
+    # E.164 format, e.g. +15551234567 (your Twilio phone number)
+    TWILIO_PHONE_NUMBER: Optional[str] = None
+
     # ============================================
     # CALENDLY - Meeting Scheduling (Optional for demo)
     # ============================================
@@ -94,6 +113,15 @@ class Settings(BaseSettings):
     def sendgrid_configured(self) -> bool:
         """Check if SendGrid is configured"""
         return bool(self.SENDGRID_API_KEY and self.SENDGRID_FROM_EMAIL)
+
+    @property
+    def twilio_configured(self) -> bool:
+        """Check if Twilio SMS is configured"""
+        return bool(
+            self.TWILIO_ACCOUNT_SID
+            and self.TWILIO_AUTH_TOKEN
+            and self.TWILIO_PHONE_NUMBER
+        )
     
     @property
     def openai_configured(self) -> bool:
@@ -104,6 +132,11 @@ class Settings(BaseSettings):
     def calendly_configured(self) -> bool:
         """Check if Calendly is configured"""
         return bool(self.CALENDLY_API_TOKEN)
+    
+    @property
+    def webhook_secret_configured(self) -> bool:
+        """True when the SendGrid webhook secret is set"""
+        return bool(self.SENDGRID_WEBHOOK_SECRET)
 
 
 @lru_cache()

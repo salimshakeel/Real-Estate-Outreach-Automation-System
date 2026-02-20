@@ -219,3 +219,32 @@ class Booking(Base):
         Index("idx_bookings_scheduled_time", "scheduled_time"),
         Index("idx_bookings_created_at", "created_at"),
     )
+
+
+# ============================================
+# TABLE 7: CHATBOT_MESSAGES (DEPENDS ON: leads)
+# ============================================
+class ChatbotMessage(Base):
+    __tablename__ = "chatbot_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lead_id = Column(
+        Integer,
+        ForeignKey("leads.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    role = Column(String(20), nullable=False)  # "user" | "assistant" | "system"
+    content = Column(Text, nullable=False)
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    # Relationship back to lead (one-to-many)
+    lead = relationship("Lead", backref="chatbot_messages")
+
+    __table_args__ = (
+        Index("idx_chatbot_messages_lead_id", "lead_id"),
+        Index("idx_chatbot_messages_created_at", "created_at"),
+    )
