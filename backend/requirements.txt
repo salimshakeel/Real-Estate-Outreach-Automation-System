@@ -19,6 +19,9 @@ python-multipart
 # Email
 sendgrid
 
+# SMS (Step 3 - Twilio, same vendor as SendGrid)
+twilio
+
 # AI APIs
 openai
 anthropic
