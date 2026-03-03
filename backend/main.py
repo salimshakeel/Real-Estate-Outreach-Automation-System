@@ -79,9 +79,15 @@ app = FastAPI(
 # ============================================
 # CORS MIDDLEWARE
 # ============================================
+# Always allow Render frontend; merge with any env CORS_ORIGINS
+FRONTEND_ORIGIN_RENDER = "https://real-estate-outreach-frontend.onrender.com"
+_cors_origins = list(settings.cors_origins_list)
+if FRONTEND_ORIGIN_RENDER not in _cors_origins:
+    _cors_origins.append(FRONTEND_ORIGIN_RENDER)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
