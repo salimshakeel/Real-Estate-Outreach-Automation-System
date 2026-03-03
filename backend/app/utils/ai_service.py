@@ -1,12 +1,9 @@
-
-
-from typing import Dict, List, Any, Optional
 import json
+from typing import Any
 
 from openai import AsyncOpenAI
 
 from app.config import get_settings
-
 
 settings = get_settings()
 
@@ -24,17 +21,17 @@ class AIService:
         # These can be extended later when wiring real LLMs
         self.primary_model = getattr(settings, "OPENAI_MODEL", "gpt-4.1")
         self.fallback_model = "gpt-3.5-turbo"
-        self._openai_client: Optional[AsyncOpenAI] = None
+        self._openai_client: AsyncOpenAI | None = None
 
         # Lazily initialize OpenAI client (only when key exists)
         if settings.OPENAI_API_KEY:
             self._openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
-    def _safe_next_action_type(self, value: Optional[str]) -> str:
+    def _safe_next_action_type(self, value: str | None) -> str:
         allowed = {"continue", "book_meeting", "escalate_human", "end"}
         return value if value in allowed else "continue"
 
-    def _parse_ai_json(self, text: str) -> Optional[Dict[str, Any]]:
+    def _parse_ai_json(self, text: str) -> dict[str, Any] | None:
         """
         Attempt to parse a JSON object from an LLM response.
         Returns None if parsing fails.
@@ -49,9 +46,9 @@ class AIService:
 
     async def _openai_chatbot_json(
         self,
-        lead_context: Dict[str, Any],
-        messages: List[Dict[str, str]],
-    ) -> Dict[str, Any]:
+        lead_context: dict[str, Any],
+        messages: list[dict[str, str]],
+    ) -> dict[str, Any]:
         """
         Call OpenAI and return normalized chatbot JSON:
         { reply, next_action: {type, reason}, updated_lead_score }
@@ -92,7 +89,7 @@ class AIService:
 
         # Keep only last ~10 messages for cost control
         trimmed = messages[-10:] if len(messages) > 10 else messages
-        openai_messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        openai_messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
         for m in trimmed:
             role = m.get("role", "user")
             content = m.get("content", "")
@@ -131,9 +128,9 @@ class AIService:
 
     async def generate_chatbot_reply(
         self,
-        lead_context: Dict[str, Any],
-        messages: List[Dict[str, str]],
-    ) -> Dict[str, Any]:
+        lead_context: dict[str, Any],
+        messages: list[dict[str, str]],
+    ) -> dict[str, Any]:
         """
         Generate a chatbot reply and next action.
 
@@ -258,3 +255,427 @@ class AIService:
 # Singleton instance used by routers
 ai_service = AIService()
 
+
+# ---------------------------------------------------------------------------
+# Standalone async LLM utility functions (used by routers, not class methods)
+# ---------------------------------------------------------------------------
+
+
+async def generate_email_variations(
+    brief: dict,
+    learned_patterns: list[str],
+) -> dict:
+    """Generate 5 email variations (A–E) based on a creative brief and
+    previously learned patterns from A/B testing."""
+
+    target_audience = brief.get("target_audience", "real estate professionals")
+    goal = brief.get("goal", "book a meeting")
+    pain_point = brief.get("pain_point", "low response rates")
+    tone = brief.get("tone", "professional yet friendly")
+    max_word_count = brief.get("max_word_count", 150)
+
+    if not ai_service.openai_configured or not ai_service._openai_client:
+        labels = ["A", "B", "C", "D", "E"]
+        triggers = ["curiosity", "urgency", "social_proof", "fear_of_missing_out", "authority"]
+        variations = [
+            {
+                "label": lbl,
+                "subject": f"[Demo] Variation {lbl} – {pain_point.title()}",
+                "body": (
+                    f"Hi {{{{first_name}}}},\n\n"
+                    f"Are you struggling with {pain_point}? "
+                    f"We help {target_audience} {goal} faster.\n\n"
+                    f"Would a quick 15-min call this week work?\n\n"
+                    f"Best,\nThe Outreach Team"
+                ),
+                "psychological_trigger": triggers[i],
+            }
+            for i, lbl in enumerate(labels)
+        ]
+        return {"variations": variations, "patterns_used": len(learned_patterns)}
+
+    patterns_block = "\n".join(f"- {p}" for p in learned_patterns) if learned_patterns else "None yet."
+
+    system_prompt = (
+        "You are an expert email copywriter for B2B real-estate outreach.\n"
+        "Return ONLY a JSON object with this shape:\n"
+        '{"variations": [{"label":"A","subject":"...","body":"...","psychological_trigger":"..."}, ...]}\n'
+        "Generate exactly 5 variations labelled A through E.\n"
+        "Each body must be under " + str(max_word_count) + " words.\n"
+        "Use a different psychological trigger for each (curiosity, urgency, social_proof, fear_of_missing_out, authority)."
+    )
+    user_prompt = (
+        f"Target audience: {target_audience}\n"
+        f"Goal: {goal}\n"
+        f"Pain point: {pain_point}\n"
+        f"Tone: {tone}\n"
+        f"Learned patterns from past A/B tests:\n{patterns_block}"
+    )
+
+    try:
+        resp = await ai_service._openai_client.chat.completions.create(
+            model=settings.OPENAI_MODEL or ai_service.primary_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.4,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        parsed = ai_service._parse_ai_json(text)
+        if not parsed or "variations" not in parsed:
+            return await generate_email_variations(brief, [])  # retry w/o patterns → hits demo
+        parsed["patterns_used"] = len(learned_patterns)
+        return parsed
+    except Exception:
+        return {
+            "variations": [],
+            "patterns_used": len(learned_patterns),
+        }
+
+
+async def analyze_ab_test(
+    variations_data: list[dict],
+) -> dict:
+    """Analyze A/B test results with weighted scoring and pick a winner."""
+
+    if not ai_service.openai_configured or not ai_service._openai_client:
+        winner = max(variations_data, key=lambda v: v.get("replies", 0)) if variations_data else {}
+        return {
+            "winner_label": winner.get("label", "A"),
+            "explanation": (
+                f"Variation {winner.get('label', 'A')} had the highest reply count "
+                f"({winner.get('replies', 0)} replies) among all tested variations."
+            ),
+            "pattern_learned": (
+                "Subject lines that reference specific pain points tend to "
+                "generate more replies in real-estate outreach."
+            ),
+        }
+
+    rows = "\n".join(
+        f"- {v.get('label')}: subject=\"{v.get('subject','')}\", "
+        f"sends={v.get('sends',0)}, opens={v.get('opens',0)}, "
+        f"clicks={v.get('clicks',0)}, replies={v.get('replies',0)}"
+        for v in variations_data
+    )
+
+    system_prompt = (
+        "You are a data-driven email marketing analyst.\n"
+        "Score each variation using weighted scoring: replies 50%, opens 30%, clicks 20%.\n"
+        "Return ONLY a JSON object:\n"
+        '{"winner_label": "X", "explanation": "...", "pattern_learned": "..."}\n'
+        "The pattern_learned should be a reusable insight for future campaigns."
+    )
+    user_prompt = f"A/B test results:\n{rows}"
+
+    try:
+        resp = await ai_service._openai_client.chat.completions.create(
+            model=settings.OPENAI_MODEL or ai_service.primary_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.4,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        parsed = ai_service._parse_ai_json(text)
+        if not parsed or "winner_label" not in parsed:
+            winner = max(variations_data, key=lambda v: v.get("replies", 0)) if variations_data else {}
+            return {
+                "winner_label": winner.get("label", "A"),
+                "explanation": "LLM response could not be parsed; fell back to highest reply count.",
+                "pattern_learned": "N/A",
+            }
+        return parsed
+    except Exception:
+        winner = max(variations_data, key=lambda v: v.get("replies", 0)) if variations_data else {}
+        return {
+            "winner_label": winner.get("label", "A"),
+            "explanation": "Analysis unavailable due to an internal error; selected by highest reply count.",
+            "pattern_learned": "N/A",
+        }
+
+
+async def score_lead(
+    lead_data: dict,
+    icp_description: str | None = None,
+    available_campaigns: list[str] | None = None,
+) -> dict:
+    """Score a lead 0-100, assign a priority tier, recommend a real campaign,
+    and generate actionable personalization hints."""
+
+    campaigns_list = available_campaigns or []
+
+    def _demo_score(ld: dict) -> dict:
+        score = 30
+        if ld.get("phone"):
+            score += 10
+        if ld.get("address"):
+            score += 10
+        est = ld.get("estimated_value") or 0
+        if isinstance(est, str):
+            est = float(est.replace("$", "").replace(",", "") or 0)
+        if est > 500_000:
+            score += 20
+        if ld.get("property_type"):
+            score += 5
+        if ld.get("company"):
+            score += 5
+
+        score = min(score, 100)
+        if score >= 75:
+            priority = "Hot"
+        elif score >= 50:
+            priority = "Warm"
+        elif score >= 25:
+            priority = "Cold"
+        else:
+            priority = "Dead"
+
+        rec_campaign = campaigns_list[0] if campaigns_list else "general-outreach"
+        prop = ld.get("property_type", "property")
+        addr = ld.get("address", "their area")
+
+        return {
+            "score": score,
+            "priority": priority,
+            "reasoning": f"Rule-based demo score for {ld.get('first_name', 'lead')}.",
+            "recommended_campaign": rec_campaign,
+            "personalization_hints": (
+                f"Reference their {prop} property in {addr}. "
+                f"Lead with ROI angle if value is above $500K, "
+                f"or market-trend angle for mid-range properties."
+            ),
+        }
+
+    if not ai_service.openai_configured or not ai_service._openai_client:
+        return _demo_score(lead_data)
+
+    lead_block = "\n".join(f"- {k}: {v}" for k, v in lead_data.items() if v)
+    icp_block = icp_description or "No specific ICP provided."
+    campaigns_block = (
+        "\n".join(f"- {c}" for c in campaigns_list) if campaigns_list
+        else "No campaigns exist yet — suggest a campaign type name."
+    )
+
+    system_prompt = (
+        "You are a lead-scoring engine for real-estate outreach.\n"
+        "Return ONLY a JSON object:\n"
+        '{"score": <0-100>, "priority": "Hot|Warm|Cold|Dead", '
+        '"reasoning": "...", "recommended_campaign": "...", "personalization_hints": "..."}\n\n'
+        "Score criteria: completeness of data, estimated property value, "
+        "match to the ideal customer profile, and engagement potential.\n\n"
+        "recommended_campaign: Pick the BEST matching campaign from the "
+        "available campaigns list. If none fit, suggest a descriptive name.\n\n"
+        "personalization_hints: Write 2-3 specific, actionable sentences a "
+        "salesperson can use when emailing this lead. Reference their property "
+        "type, location, estimated value, and any unique angle that would "
+        "resonate with them. Be concrete — not generic advice."
+    )
+    user_prompt = (
+        f"Lead data:\n{lead_block}\n\n"
+        f"Ideal Customer Profile:\n{icp_block}\n\n"
+        f"Available campaigns:\n{campaigns_block}"
+    )
+
+    try:
+        resp = await ai_service._openai_client.chat.completions.create(
+            model=settings.OPENAI_MODEL or ai_service.primary_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.4,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        parsed = ai_service._parse_ai_json(text)
+        if not parsed or "score" not in parsed:
+            return _demo_score(lead_data)
+        parsed.setdefault("priority", "Warm")
+        parsed.setdefault("reasoning", "")
+        parsed.setdefault("recommended_campaign",
+                          campaigns_list[0] if campaigns_list else "general-outreach")
+        parsed.setdefault("personalization_hints", "")
+        return parsed
+    except Exception:
+        return _demo_score(lead_data)
+
+
+async def generate_personalization_hints(
+    lead_data: dict,
+    campaign_goal: str,
+) -> dict:
+    """Suggest a personalization angle given lead data and campaign goal."""
+
+    property_type = lead_data.get("property_type", "property")
+    city = lead_data.get("city") or lead_data.get("address", "their area")
+
+    if not ai_service.openai_configured or not ai_service._openai_client:
+        return {
+            "hints": (
+                f"Reference their property type ({property_type}) and local "
+                f"market conditions in {city}. Lead with ROI angle."
+            ),
+        }
+
+    lead_block = "\n".join(f"- {k}: {v}" for k, v in lead_data.items() if v)
+
+    system_prompt = (
+        "You are a personalization strategist for real-estate email outreach.\n"
+        "Return ONLY a JSON object:\n"
+        '{"hints": "..."}\n'
+        "The hints field should be 1-3 sentences of actionable personalization advice."
+    )
+    user_prompt = (
+        f"Lead data:\n{lead_block}\n\n"
+        f"Campaign goal: {campaign_goal}"
+    )
+
+    try:
+        resp = await ai_service._openai_client.chat.completions.create(
+            model=settings.OPENAI_MODEL or ai_service.primary_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.4,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        parsed = ai_service._parse_ai_json(text)
+        if not parsed or "hints" not in parsed:
+            return {
+                "hints": f"Reference their {property_type} property and local market conditions in {city}.",
+            }
+        return parsed
+    except Exception:
+        return {
+            "hints": f"Reference their {property_type} property and local market conditions in {city}.",
+        }
+
+
+async def generate_weekly_insights(
+    stats: dict,
+) -> dict:
+    """Generate a plain-English weekly performance summary with highlights
+    and recommendations."""
+
+    if not ai_service.openai_configured or not ai_service._openai_client:
+        emails_sent = stats.get("emails_sent", 0)
+        opens = stats.get("opens", 0)
+        replies = stats.get("replies", 0)
+        open_rate = stats.get("open_rate", 0)
+        reply_rate = stats.get("reply_rate", 0)
+        return {
+            "summary": (
+                f"This week you sent {emails_sent} emails with a {open_rate:.1f}% open rate "
+                f"and {reply_rate:.1f}% reply rate. You received {replies} replies and "
+                f"{stats.get('bookings', 0)} bookings."
+            ),
+            "highlights": [
+                f"Total emails sent: {emails_sent}",
+                f"Open rate: {open_rate:.1f}%",
+                f"Reply rate: {reply_rate:.1f}%",
+                f"Top campaign: {stats.get('top_campaign', 'N/A')}",
+            ],
+            "recommendations": [
+                "Test subject-line variations to lift open rates.",
+                "Follow up with non-openers after 48 hours.",
+                "Consider adding SMS touchpoints for high-value leads.",
+            ],
+        }
+
+    stats_block = "\n".join(f"- {k}: {v}" for k, v in stats.items())
+
+    system_prompt = (
+        "You are a marketing analytics assistant for a real-estate outreach platform.\n"
+        "Return ONLY a JSON object:\n"
+        '{"summary": "...", "highlights": ["...", "..."], "recommendations": ["...", "..."]}\n'
+        "summary: 2-3 sentence plain-English overview.\n"
+        "highlights: 3-5 bullet strings of notable data points.\n"
+        "recommendations: 2-4 actionable suggestions for next week."
+    )
+    user_prompt = f"Weekly stats:\n{stats_block}"
+
+    try:
+        resp = await ai_service._openai_client.chat.completions.create(
+            model=settings.OPENAI_MODEL or ai_service.primary_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.4,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        parsed = ai_service._parse_ai_json(text)
+        if not parsed or "summary" not in parsed:
+            return await generate_weekly_insights(stats={})  # safe demo fallback
+        parsed.setdefault("highlights", [])
+        parsed.setdefault("recommendations", [])
+        return parsed
+    except Exception:
+        return {
+            "summary": "Weekly insights could not be generated due to an internal error.",
+            "highlights": [],
+            "recommendations": ["Retry insights generation later."],
+        }
+
+
+async def analyze_campaign_performance(
+    campaign_data: dict,
+) -> dict:
+    """Analyze a single campaign's aggregate stats and return a plain-English
+    summary with an actionable suggestion."""
+
+    name = campaign_data.get("name", "Campaign")
+
+    if not ai_service.openai_configured or not ai_service._openai_client:
+        sends = campaign_data.get("sends", 0)
+        opens = campaign_data.get("opens", 0)
+        replies = campaign_data.get("replies", 0)
+        open_pct = (opens / sends * 100) if sends else 0
+        reply_pct = (replies / sends * 100) if sends else 0
+        return {
+            "analysis": (
+                f"{name} sent {sends} emails with a {open_pct:.1f}% open rate "
+                f"and {reply_pct:.1f}% reply rate."
+            ),
+            "suggestion": (
+                "Try refreshing the subject line or adjusting send times "
+                "to improve engagement."
+            ),
+        }
+
+    stats_block = "\n".join(f"- {k}: {v}" for k, v in campaign_data.items())
+
+    system_prompt = (
+        "You are a campaign performance analyst for real-estate outreach.\n"
+        "Return ONLY a JSON object:\n"
+        '{"analysis": "...", "suggestion": "..."}\n'
+        "analysis: 2-3 sentences summarising performance.\n"
+        "suggestion: 1-2 sentences with a concrete next step."
+    )
+    user_prompt = f"Campaign data:\n{stats_block}"
+
+    try:
+        resp = await ai_service._openai_client.chat.completions.create(
+            model=settings.OPENAI_MODEL or ai_service.primary_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.4,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        parsed = ai_service._parse_ai_json(text)
+        if not parsed or "analysis" not in parsed:
+            return {
+                "analysis": f"{name} performance data could not be analyzed by the LLM.",
+                "suggestion": "Review raw metrics manually and adjust targeting.",
+            }
+        return parsed
+    except Exception:
+        return {
+            "analysis": f"Analysis for {name} is unavailable due to an internal error.",
+            "suggestion": "Retry later or review metrics in the dashboard.",
+        }

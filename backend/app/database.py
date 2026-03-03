@@ -3,7 +3,7 @@ Database Configuration
 All database connections managed here.
 """
 
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
 
@@ -36,7 +36,7 @@ async def get_db():
     """
     Dependency that provides a database session.
     Yields an async session and ensures it's closed after use.
-    
+
     Usage in FastAPI:
         @app.get("/items")
         async def get_items(db: AsyncSession = Depends(get_db)):

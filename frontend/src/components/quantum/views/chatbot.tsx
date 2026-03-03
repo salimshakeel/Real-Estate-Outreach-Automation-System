@@ -106,11 +106,14 @@ export function ViewChatbot({
               <PriorityBadge p={ctxLead.priority} />
             </div>
             <div style={{ flex: 1, overflow: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(0,234,255,0.06)", border: "1px solid rgba(0,234,255,0.2)", fontSize: 12, color: "var(--text-secondary)", marginBottom: 8 }}>
+                <strong style={{ color: "var(--cyan)" }}>How this works:</strong> You’re simulating the <strong>lead</strong> ({ctxLead.first_name}). Messages you type are treated as if {ctxLead.first_name} said them. The AI replies as your <strong>sales assistant</strong> to qualify and book meetings.
+              </div>
               {loadingHistory && (
                 <div style={{ color: "var(--text-dim)", fontSize: 13 }}>Loading history…</div>
               )}
               {!loadingHistory && messages.length === 0 && (
-                <div style={{ color: "var(--text-dim)", fontSize: 13 }}>Start the conversation. Ask about pricing, demo, or property management.</div>
+                <div style={{ color: "var(--text-dim)", fontSize: 13 }}>Type what the lead might say (e.g. “What’s the pricing?” or “I’d like a demo”). The AI will respond as the sales assistant.</div>
               )}
               {messages.map((msg, i) => (
                 <div key={i} style={{ alignSelf: msg.role === "user" ? "flex-end" : "flex-start", maxWidth: "85%", padding: "12px 16px", borderRadius: 12, background: msg.role === "user" ? "var(--cyan-dim)" : "rgba(255,255,255,0.06)", fontSize: 13 }}>
@@ -119,7 +122,7 @@ export function ViewChatbot({
               ))}
             </div>
             <div style={{ padding: 16, borderTop: "1px solid var(--border)", display: "flex", gap: 10 }}>
-              <Input placeholder="Type a message…" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} style={{ flex: 1 }} />
+              <Input placeholder={`What would ${ctxLead.first_name} say? (simulate lead)`} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} style={{ flex: 1 }} />
               <Btn primary icon={I.send} onClick={send} disabled={sending || !input.trim()}>Send</Btn>
             </div>
           </>

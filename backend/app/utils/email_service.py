@@ -14,11 +14,10 @@ Key features:
   - Personalization template engine using {{placeholder}} syntax
 """
 
+import asyncio
 import re
 import uuid
-import asyncio
-from typing import Dict, Optional, List
-from datetime import datetime, date
+from datetime import date, datetime
 
 from app.config import get_settings
 
@@ -28,6 +27,7 @@ settings = get_settings()
 # ============================================
 # DAILY SEND RATE LIMITER (Email Warming)
 # ============================================
+
 
 class DailySendLimiter:
     """
@@ -84,15 +84,15 @@ _daily_limiter = DailySendLimiter()
 # EMAIL SERVICE
 # ============================================
 
-class EmailService:
 
+class EmailService:
 
     # ----------------------------------------
     # TEMPLATE PERSONALIZATION
     # ----------------------------------------
 
     @staticmethod
-    def personalize_template(template: str, lead_data: Dict) -> str:
+    def personalize_template(template: str, lead_data: dict) -> str:
         """
         Replace {{placeholders}} with actual lead data.
 
@@ -102,18 +102,15 @@ class EmailService:
           {{property_type}}, {{estimated_value}}, {{lead_id}}
         """
         placeholders = {
-            "{{first_name}}":      lead_data.get("first_name", ""),
-            "{{last_name}}":       lead_data.get("last_name", ""),
-            "{{email}}":           lead_data.get("email", ""),
-            "{{phone}}":           lead_data.get("phone", ""),
-            "{{address}}":         lead_data.get("address", ""),
-            "{{property_type}}":   lead_data.get("property_type", ""),
+            "{{first_name}}": lead_data.get("first_name", ""),
+            "{{last_name}}": lead_data.get("last_name", ""),
+            "{{email}}": lead_data.get("email", ""),
+            "{{phone}}": lead_data.get("phone", ""),
+            "{{address}}": lead_data.get("address", ""),
+            "{{property_type}}": lead_data.get("property_type", ""),
             "{{estimated_value}}": lead_data.get("estimated_value", ""),
-            "{{lead_id}}":         str(lead_data.get("lead_id", "")),
-            "{{full_name}}": (
-                f"{lead_data.get('first_name', '')} "
-                f"{lead_data.get('last_name', '')}".strip()
-            ),
+            "{{lead_id}}": str(lead_data.get("lead_id", "")),
+            "{{full_name}}": (f"{lead_data.get('first_name', '')} " f"{lead_data.get('last_name', '')}".strip()),
         }
         result = template
         for placeholder, value in placeholders.items():
@@ -121,21 +118,15 @@ class EmailService:
         return result
 
     @staticmethod
-    def extract_placeholders(template: str) -> List[str]:
+    def extract_placeholders(template: str) -> list[str]:
         """Return list of all {{placeholder}} names found in a template."""
-        return re.findall(r'\{\{(\w+)\}\}', template)
+        return re.findall(r"\{\{(\w+)\}\}", template)
 
     # ----------------------------------------
     # CORE SEND (auto-routes mock vs SendGrid)
     # ----------------------------------------
 
-    async def send_email(
-        self,
-        to_email: str,
-        subject: str,
-        body: str,
-        from_email: Optional[str] = None
-    ) -> Dict:
+    async def send_email(self, to_email: str, subject: str, body: str, from_email: str | None = None) -> dict:
         """
         Send a single email. Does NOT update the database.
         Use send_campaign_email() for campaign sends with DB tracking.
@@ -167,9 +158,9 @@ class EmailService:
         body: str,
         sequence_id: int,
         db,
-        from_email: Optional[str] = None,
+        from_email: str | None = None,
         max_retries: int = 3,
-    ) -> Dict:
+    ) -> dict:
         """
         Production email send with full DB tracking and retry logic.
 
@@ -204,11 +195,11 @@ class EmailService:
                 "error": msg,
                 "skipped_daily_limit": True,
                 "mode": "sendgrid" if settings.sendgrid_configured else "mock",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
         # ---- Send with retry and exponential backoff ----
-        last_result: Dict = {}
+        last_result: dict = {}
 
         for attempt in range(1, max_retries + 1):
             last_result = await self.send_email(to_email, subject, body, from_email)
@@ -219,17 +210,13 @@ class EmailService:
                 # ---- CRITICAL: Save message_id to DB ----
                 # This links SendGrid events back to our EmailSequence rows.
                 if sequence_id and db:
-                    await self._persist_message_id(
-                        db=db,
-                        sequence_id=sequence_id,
-                        message_id=last_result["message_id"]
-                    )
+                    await self._persist_message_id(db=db, sequence_id=sequence_id, message_id=last_result["message_id"])
 
                 return last_result
 
             # Failed — retry with backoff
             if attempt < max_retries:
-                wait_seconds = 2 ** (attempt - 1)   # 1s, 2s, 4s
+                wait_seconds = 2 ** (attempt - 1)  # 1s, 2s, 4s
                 print(
                     f"⚠️  Send attempt {attempt}/{max_retries} failed for {to_email}. "
                     f"Retrying in {wait_seconds}s... "
@@ -252,11 +239,10 @@ class EmailService:
         """
         try:
             from sqlalchemy import select
+
             from app.models import EmailSequence
 
-            result = await db.execute(
-                select(EmailSequence).where(EmailSequence.id == sequence_id)
-            )
+            result = await db.execute(select(EmailSequence).where(EmailSequence.id == sequence_id))
             sequence = result.scalar_one_or_none()
 
             if sequence:
@@ -276,12 +262,7 @@ class EmailService:
     # BULK SEND (no DB tracking)
     # ----------------------------------------
 
-    async def send_bulk(
-        self,
-        emails: List[Dict],
-        subject_template: str,
-        body_template: str
-    ) -> Dict:
+    async def send_bulk(self, emails: list[dict], subject_template: str, body_template: str) -> dict:
         """
         Send personalized emails to a list of lead dicts.
         No DB tracking — for campaign sends use send_campaign_email() per lead.
@@ -299,12 +280,14 @@ class EmailService:
             else:
                 results["failed"] += 1
 
-            results["details"].append({
-                "email": to_email,
-                "success": result.get("success"),
-                "message_id": result.get("message_id"),
-                "error": result.get("error")
-            })
+            results["details"].append(
+                {
+                    "email": to_email,
+                    "success": result.get("success"),
+                    "message_id": result.get("message_id"),
+                    "error": result.get("error"),
+                }
+            )
 
         return results
 
@@ -312,27 +295,21 @@ class EmailService:
     # SEND STATUS (for dashboard)
     # ----------------------------------------
 
-    def get_send_status(self) -> Dict:
+    def get_send_status(self) -> dict:
         """Returns current daily send status. Use on dashboard endpoint."""
         return {
             "sent_today": _daily_limiter.sent_today,
             "remaining_today": _daily_limiter.remaining_today,
             "daily_limit": settings.SENDGRID_DAILY_SEND_LIMIT,
             "unlimited": settings.SENDGRID_DAILY_SEND_LIMIT <= 0,
-            "mode": "sendgrid" if settings.sendgrid_configured else "mock"
+            "mode": "sendgrid" if settings.sendgrid_configured else "mock",
         }
 
     # ----------------------------------------
     # PRIVATE: MOCK SEND
     # ----------------------------------------
 
-    async def _send_mock(
-        self,
-        to_email: str,
-        subject: str,
-        body: str,
-        from_email: Optional[str]
-    ) -> Dict:
+    async def _send_mock(self, to_email: str, subject: str, body: str, from_email: str | None) -> dict:
         """Mock send — logs to console, no real email sent."""
         message_id = f"mock_{uuid.uuid4().hex[:12]}"
 
@@ -350,43 +327,29 @@ class EmailService:
         print(f"  Timestamp  : {datetime.utcnow().isoformat()}Z")
         print("=" * 60 + "\n")
 
-        return {
-            "success": True,
-            "message_id": message_id,
-            "mode": "mock",
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        return {"success": True, "message_id": message_id, "mode": "mock", "timestamp": datetime.utcnow().isoformat()}
 
     # ----------------------------------------
     # PRIVATE: SENDGRID SEND
     # ----------------------------------------
 
-    async def _send_via_sendgrid(
-        self,
-        to_email: str,
-        subject: str,
-        body: str,
-        from_email: Optional[str]
-    ) -> Dict:
+    async def _send_via_sendgrid(self, to_email: str, subject: str, body: str, from_email: str | None) -> dict:
         """Send via SendGrid API. Only called when API key + from_email are configured."""
         try:
             from sendgrid import SendGridAPIClient
-            from sendgrid.helpers.mail import Mail, Email, To, Content
+            from sendgrid.helpers.mail import Content, Email, Mail, To
 
             message = Mail(
                 from_email=Email(from_email, settings.SENDGRID_FROM_NAME),
                 to_emails=To(to_email),
                 subject=subject,
-                html_content=Content("text/html", body)
+                html_content=Content("text/html", body),
             )
 
             sg = SendGridAPIClient(settings.SENDGRID_API_KEY)
             response = sg.send(message)
 
-            message_id = response.headers.get(
-                "X-Message-Id",
-                f"sg_{uuid.uuid4().hex[:12]}"
-            )
+            message_id = response.headers.get("X-Message-Id", f"sg_{uuid.uuid4().hex[:12]}")
 
             print(f"✅ Email sent → {to_email} | ID: {message_id} | Status: {response.status_code}")
 
@@ -395,7 +358,7 @@ class EmailService:
                 "message_id": message_id,
                 "mode": "sendgrid",
                 "status_code": response.status_code,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
         except Exception as e:
@@ -405,7 +368,7 @@ class EmailService:
                 "success": False,
                 "error": error_msg,
                 "mode": "sendgrid",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
 

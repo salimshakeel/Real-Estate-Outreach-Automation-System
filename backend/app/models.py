@@ -1,9 +1,19 @@
+from datetime import datetime
+
 from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, Boolean, 
-    ForeignKey, Numeric, CheckConstraint, Index, text
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    text,
 )
 from sqlalchemy.orm import relationship
-from datetime import datetime
 
 from app.database import Base
 
@@ -21,7 +31,9 @@ class EmailTemplate(Base):
     is_default = Column(Boolean, default=False, server_default=text("FALSE"))
     created_by = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP")
+    )
 
     __table_args__ = (
         Index("idx_email_templates_is_default", "is_default"),
@@ -44,12 +56,13 @@ class Campaign(Base):
     ended_at = Column(DateTime)
     created_by = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP")
+    )
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('draft', 'scheduled', 'active', 'completed', 'paused')",
-            name="campaigns_status_check"
+            "status IN ('draft', 'scheduled', 'active', 'completed', 'paused')", name="campaigns_status_check"
         ),
         Index("idx_campaigns_status", "status"),
         Index("idx_campaigns_created_at", "created_at"),
@@ -76,34 +89,30 @@ class Lead(Base):
     notes = Column(Text)
     created_by = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP")
+    )
 
     # Relationships (CASCADE delete)
-    email_sequences = relationship(
-        "EmailSequence", 
-        back_populates="lead", 
-        cascade="all, delete-orphan"
-    )
-    replies = relationship(
-        "Reply", 
-        back_populates="lead", 
-        cascade="all, delete-orphan"
-    )
-    bookings = relationship(
-        "Booking", 
-        back_populates="lead", 
-        cascade="all, delete-orphan"
-    )
+    email_sequences = relationship("EmailSequence", back_populates="lead", cascade="all, delete-orphan")
+    replies = relationship("Reply", back_populates="lead", cascade="all, delete-orphan")
+    bookings = relationship("Booking", back_populates="lead", cascade="all, delete-orphan")
     sms_messages = relationship(
         "SmsMessage",
         back_populates="lead",
         cascade="all, delete-orphan",
     )
+    voice_calls = relationship(
+        "VoiceCall",
+        back_populates="lead",
+        cascade="all, delete-orphan",
+    )
+    ai_score = relationship("AiLeadScore", back_populates="lead", uselist=False, cascade="all, delete-orphan")
 
     __table_args__ = (
         CheckConstraint(
             "status IN ('uploaded', 'contacted', 'replied', 'interested', 'booked', 'closed')",
-            name="leads_status_check"
+            name="leads_status_check",
         ),
         Index("idx_leads_email", "email"),
         Index("idx_leads_status", "status"),
@@ -119,11 +128,7 @@ class EmailSequence(Base):
     __tablename__ = "email_sequences"
 
     id = Column(Integer, primary_key=True, index=True)
-    lead_id = Column(
-        Integer, 
-        ForeignKey("leads.id", ondelete="CASCADE", onupdate="CASCADE"), 
-        nullable=False
-    )
+    lead_id = Column(Integer, ForeignKey("leads.id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False)
     sequence_day = Column(Integer, default=1, server_default=text("1"))
     email_subject = Column(String(255))
     email_body = Column(Text)
@@ -135,7 +140,9 @@ class EmailSequence(Base):
     sendgrid_message_id = Column(String(255))
     bounce_reason = Column(String(255))
     created_at = Column(DateTime, default=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP")
+    )
 
     # Relationship
     lead = relationship("Lead", back_populates="email_sequences")
@@ -143,7 +150,7 @@ class EmailSequence(Base):
     __table_args__ = (
         CheckConstraint(
             "status IN ('pending', 'scheduled', 'sent', 'opened', 'replied', 'bounced')",
-            name="email_sequences_status_check"
+            name="email_sequences_status_check",
         ),
         Index("idx_email_sequences_lead_id", "lead_id"),
         Index("idx_email_sequences_status", "status"),
@@ -159,11 +166,7 @@ class Reply(Base):
     __tablename__ = "replies"
 
     id = Column(Integer, primary_key=True, index=True)
-    lead_id = Column(
-        Integer, 
-        ForeignKey("leads.id", ondelete="CASCADE", onupdate="CASCADE"), 
-        nullable=False
-    )
+    lead_id = Column(Integer, ForeignKey("leads.id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False)
     email_from = Column(String(255))
     email_subject = Column(String(255))
     email_body = Column(Text)
@@ -180,11 +183,11 @@ class Reply(Base):
     __table_args__ = (
         CheckConstraint(
             "sentiment IN ('interested', 'not_now', 'unsubscribe', 'other') OR sentiment IS NULL",
-            name="replies_sentiment_check"
+            name="replies_sentiment_check",
         ),
         CheckConstraint(
             "(confidence_score >= 0 AND confidence_score <= 1) OR confidence_score IS NULL",
-            name="replies_confidence_check"
+            name="replies_confidence_check",
         ),
         Index("idx_replies_lead_id", "lead_id"),
         Index("idx_replies_sentiment", "sentiment"),
@@ -199,18 +202,16 @@ class Booking(Base):
     __tablename__ = "bookings"
 
     id = Column(Integer, primary_key=True, index=True)
-    lead_id = Column(
-        Integer, 
-        ForeignKey("leads.id", ondelete="CASCADE", onupdate="CASCADE"), 
-        nullable=False
-    )
+    lead_id = Column(Integer, ForeignKey("leads.id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False)
     calendly_event_id = Column(String(255))
     event_uri = Column(String(255))
     scheduled_time = Column(DateTime, nullable=False)
     calendly_invitee_email = Column(String(255))
     calendly_response_status = Column(String(50), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP")
+    )
 
     # Relationship
     lead = relationship("Lead", back_populates="bookings")
@@ -218,7 +219,7 @@ class Booking(Base):
     __table_args__ = (
         CheckConstraint(
             "calendly_response_status IN ('confirmed', 'tentative', 'cancelled') OR calendly_response_status IS NULL",
-            name="bookings_response_status_check"
+            name="bookings_response_status_check",
         ),
         Index("idx_bookings_lead_id", "lead_id"),
         Index("idx_bookings_scheduled_time", "scheduled_time"),
@@ -253,7 +254,10 @@ class ChatbotMessage(Base):
         Index("idx_chatbot_messages_lead_id", "lead_id"),
         Index("idx_chatbot_messages_created_at", "created_at"),
     )
-#HELLO WORLD
+
+
+# HELLO WORLD
+
 
 # ============================================
 # TABLE 8: SMS_MESSAGES (DEPENDS ON: leads)
@@ -282,11 +286,142 @@ class SmsMessage(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending', 'sent', 'delivered', 'failed', 'undelivered')",
-            name="sms_messages_status_check"
+            "status IN ('pending', 'sent', 'delivered', 'failed', 'undelivered')", name="sms_messages_status_check"
         ),
         Index("idx_sms_messages_lead_id", "lead_id"),
         Index("idx_sms_messages_status", "status"),
         Index("idx_sms_messages_created_at", "created_at"),
         Index("idx_sms_messages_twilio_sid", "twilio_sid"),
+    )
+
+
+# ============================================
+# TABLE 9: VOICE_CALLS (DEPENDS ON: leads)
+# ============================================
+class VoiceCall(Base):
+    __tablename__ = "voice_calls"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lead_id = Column(
+        Integer,
+        ForeignKey("leads.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    to_number = Column(String(20), nullable=False)
+    retell_call_id = Column(String(255), nullable=True)
+    retell_agent_id = Column(String(255), nullable=True)
+    status = Column(String(50), default="pending", server_default=text("'pending'"))
+    duration_seconds = Column(Integer, nullable=True)
+    call_summary = Column(Text, nullable=True)
+    call_outcome = Column(String(50), nullable=True)
+    transcript = Column(Text, nullable=True)
+    recording_url = Column(String(500), nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+    created_at = Column(
+        DateTime,
+        default=datetime.utcnow,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    lead = relationship("Lead", back_populates="voice_calls")
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'calling', 'in_progress', 'completed', 'failed', 'no_answer', 'busy', 'voicemail')",
+            name="voice_calls_status_check",
+        ),
+        CheckConstraint(
+            "call_outcome IN ('booked', 'interested', 'not_interested', 'callback', 'voicemail', 'no_outcome') OR call_outcome IS NULL",
+            name="voice_calls_outcome_check",
+        ),
+        Index("idx_voice_calls_lead_id", "lead_id"),
+        Index("idx_voice_calls_status", "status"),
+        Index("idx_voice_calls_retell_call_id", "retell_call_id"),
+        Index("idx_voice_calls_created_at", "created_at"),
+    )
+
+
+# ============================================
+# TABLE 10: AI_LEAD_SCORES (one per lead)
+# ============================================
+class AiLeadScore(Base):
+    __tablename__ = "ai_lead_scores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    lead_id = Column(
+        Integer,
+        ForeignKey("leads.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    score = Column(Integer, nullable=False)  # 0-100
+    priority = Column(String(20), nullable=False)  # Hot / Warm / Cold / Dead
+    reasoning = Column(Text, nullable=True)
+    recommended_campaign = Column(String(255), nullable=True)
+    personalization_hints = Column(Text, nullable=True)
+    ai_model_used = Column(String(50), nullable=True)
+    scored_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
+
+    lead = relationship("Lead", back_populates="ai_score")
+
+    __table_args__ = (
+        CheckConstraint("score >= 0 AND score <= 100", name="ai_lead_scores_score_check"),
+        CheckConstraint(
+            "priority IN ('Hot', 'Warm', 'Cold', 'Dead')",
+            name="ai_lead_scores_priority_check",
+        ),
+        Index("idx_ai_lead_scores_lead_id", "lead_id"),
+        Index("idx_ai_lead_scores_priority", "priority"),
+        Index("idx_ai_lead_scores_score", "score"),
+    )
+
+
+# ============================================
+# TABLE 11: CAMPAIGN_VARIATIONS (depends on campaigns)
+# ============================================
+class CampaignVariation(Base):
+    __tablename__ = "campaign_variations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(
+        Integer,
+        ForeignKey("campaigns.id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=False,
+    )
+    label = Column(String(10), nullable=False)  # "A", "B", "C", "D", "E"
+    subject = Column(String(255), nullable=False)
+    body = Column(Text, nullable=False)
+    psychological_trigger = Column(String(100), nullable=True)
+    sends = Column(Integer, default=0, server_default=text("0"))
+    opens = Column(Integer, default=0, server_default=text("0"))
+    clicks = Column(Integer, default=0, server_default=text("0"))
+    replies = Column(Integer, default=0, server_default=text("0"))
+    is_winner = Column(Boolean, default=False, server_default=text("FALSE"))
+    created_at = Column(DateTime, default=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
+
+    __table_args__ = (
+        Index("idx_campaign_variations_campaign_id", "campaign_id"),
+        Index("idx_campaign_variations_is_winner", "is_winner"),
+    )
+
+
+# ============================================
+# TABLE 12: AI_PATTERNS (learning memory)
+# ============================================
+class AiPattern(Base):
+    __tablename__ = "ai_patterns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pattern = Column(Text, nullable=False)  # Plain English description
+    category = Column(String(50), nullable=False)  # "subject_line", "body_copy", "send_time", "audience", etc.
+    confidence = Column(Numeric(3, 2), nullable=True)  # 0.00-1.00
+    sample_size = Column(Integer, nullable=True)  # How many emails this pattern is based on
+    source_campaign_id = Column(Integer, nullable=True)  # Which campaign produced this learning
+    created_at = Column(DateTime, default=datetime.utcnow, server_default=text("CURRENT_TIMESTAMP"))
+
+    __table_args__ = (
+        Index("idx_ai_patterns_category", "category"),
+        Index("idx_ai_patterns_created_at", "created_at"),
     )

@@ -3,16 +3,16 @@ Dashboard Router
 Endpoints for dashboard statistics and analytics
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+
 from fastapi import APIRouter, Depends
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
 
 from app.database import get_db
-from app.models import Lead, EmailSequence, Reply, Booking, Campaign
-from app.schemas import (
-    DashboardStats, DashboardLeadFunnel, DashboardRecentActivity, DashboardResponse
-)
+from app.models import Booking, Campaign, EmailSequence, Lead, Reply, SmsMessage, VoiceCall
+from app.schemas import DashboardLeadFunnel, DashboardRecentActivity, DashboardResponse, DashboardStats, WeeklyInsightsResponse
+from app.utils.ai_service import generate_weekly_insights
 
 router = APIRouter()
 
@@ -21,139 +21,110 @@ router = APIRouter()
 # MAIN DASHBOARD
 # ============================================
 @router.get("", response_model=DashboardResponse)
-async def get_dashboard(
-    db: AsyncSession = Depends(get_db)
-):
+async def get_dashboard(db: AsyncSession = Depends(get_db)):
     """
     Get complete dashboard with stats, funnel, and recent activity.
-    
+
     This is the main endpoint for the dashboard view.
     """
     stats = await get_stats(db)
     funnel = await get_funnel(db)
     activity = await get_recent_activity(db)
-    
-    return DashboardResponse(
-        stats=stats,
-        funnel=funnel,
-        recent_activity=activity
-    )
+
+    return DashboardResponse(stats=stats, funnel=funnel, recent_activity=activity)
 
 
 # ============================================
 # STATISTICS
 # ============================================
 @router.get("/stats", response_model=DashboardStats)
-async def get_dashboard_stats(
-    db: AsyncSession = Depends(get_db)
-):
+async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     """Get dashboard statistics only"""
     return await get_stats(db)
 
 
 async def get_stats(db: AsyncSession) -> DashboardStats:
     """Calculate all dashboard statistics"""
-    #HELLO WORLD
+    # HELLO WORLD
     # Time boundaries
-    now = datetime.utcnow(0
+    now = datetime.utcnow().replace(tzinfo=UTC)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week_start = today_start - timedelta(days=today_start.weekday())
-    
-    # ---- LEADS ----
+
+    # ---- LEADS ----S
     total_leads_result = await db.execute(select(func.count(Lead.id)))
     total_leads = total_leads_result.scalar() or 0
-    
+
     # Leads by status
-    leads_by_status_query = select(
-        Lead.status, func.count(Lead.id)
-    ).group_by(Lead.status)
+    leads_by_status_query = select(Lead.status, func.count(Lead.id)).group_by(Lead.status)
     leads_status_result = await db.execute(leads_by_status_query)
     leads_by_status = {row[0]: row[1] for row in leads_status_result.fetchall()}
-    
+
     # ---- EMAILS ----
     total_emails_result = await db.execute(select(func.count(EmailSequence.id)))
     total_emails_sent = total_emails_result.scalar() or 0
-    
+
     # Emails by status
     emails_opened_result = await db.execute(
-        select(func.count(EmailSequence.id)).where(EmailSequence.status == 'opened')
+        select(func.count(EmailSequence.id)).where(EmailSequence.status == "opened")
     )
     emails_opened = emails_opened_result.scalar() or 0
-    
+
     emails_replied_result = await db.execute(
-        select(func.count(EmailSequence.id)).where(EmailSequence.status == 'replied')
+        select(func.count(EmailSequence.id)).where(EmailSequence.status == "replied")
     )
     emails_replied = emails_replied_result.scalar() or 0
-    
+
     emails_bounced_result = await db.execute(
-        select(func.count(EmailSequence.id)).where(EmailSequence.status == 'bounced')
+        select(func.count(EmailSequence.id)).where(EmailSequence.status == "bounced")
     )
     emails_bounced = emails_bounced_result.scalar() or 0
-    
+
     # Calculate rates
     open_rate = (emails_opened / total_emails_sent * 100) if total_emails_sent > 0 else 0.0
     reply_rate = (emails_replied / total_emails_sent * 100) if total_emails_sent > 0 else 0.0
-    
+
     # ---- REPLIES ----
     total_replies_result = await db.execute(select(func.count(Reply.id)))
     total_replies = total_replies_result.scalar() or 0
-    
+
     # Replies by sentiment
-    replies_by_sentiment_query = select(
-        Reply.sentiment, func.count(Reply.id)
-    ).group_by(Reply.sentiment)
+    replies_by_sentiment_query = select(Reply.sentiment, func.count(Reply.id)).group_by(Reply.sentiment)
     replies_sentiment_result = await db.execute(replies_by_sentiment_query)
-    replies_by_sentiment = {
-        row[0] or "unprocessed": row[1] 
-        for row in replies_sentiment_result.fetchall()
-    }
-    
+    replies_by_sentiment = {row[0] or "unprocessed": row[1] for row in replies_sentiment_result.fetchall()}
+
     # ---- BOOKINGS ----
     total_bookings_result = await db.execute(select(func.count(Booking.id)))
     total_bookings = total_bookings_result.scalar() or 0
-    
-    upcoming_bookings_result = await db.execute(
-        select(func.count(Booking.id)).where(Booking.scheduled_time >= now)
-    )
+
+    upcoming_bookings_result = await db.execute(select(func.count(Booking.id)).where(Booking.scheduled_time >= now))
     upcoming_bookings = upcoming_bookings_result.scalar() or 0
-    
+
     # ---- TIME-BASED METRICS ----
     # Emails sent today
     emails_today_result = await db.execute(
         select(func.count(EmailSequence.id)).where(
-            and_(
-                EmailSequence.sent_at >= today_start,
-                EmailSequence.status.in_(['sent', 'opened', 'replied'])
-            )
+            and_(EmailSequence.sent_at >= today_start, EmailSequence.status.in_(["sent", "opened", "replied"]))
         )
     )
     emails_sent_today = emails_today_result.scalar() or 0
-    
+
     # Emails sent this week
     emails_week_result = await db.execute(
         select(func.count(EmailSequence.id)).where(
-            and_(
-                EmailSequence.sent_at >= week_start,
-                EmailSequence.status.in_(['sent', 'opened', 'replied'])
-            )
+            and_(EmailSequence.sent_at >= week_start, EmailSequence.status.in_(["sent", "opened", "replied"]))
         )
     )
     emails_sent_this_week = emails_week_result.scalar() or 0
-    
+
     # Replies today
-    replies_today_result = await db.execute(
-        select(func.count(Reply.id)).where(Reply.created_at >= today_start)
-    )
+    replies_today_result = await db.execute(select(func.count(Reply.id)).where(Reply.created_at >= today_start))
     replies_today = replies_today_result.scalar() or 0
-    
+
     # Bookings this week
-    bookings_week_result = await db.execute(
-        select(func.count(Booking.id)).where(
-            Booking.scheduled_time >= week_start
-        )
-    )
+    bookings_week_result = await db.execute(select(func.count(Booking.id)).where(Booking.scheduled_time >= week_start))
     bookings_this_week = bookings_week_result.scalar() or 0
-    
+
     return DashboardStats(
         total_leads=total_leads,
         leads_by_status=leads_by_status,
@@ -170,7 +141,7 @@ async def get_stats(db: AsyncSession) -> DashboardStats:
         emails_sent_today=emails_sent_today,
         emails_sent_this_week=emails_sent_this_week,
         replies_today=replies_today,
-        bookings_this_week=bookings_this_week
+        bookings_this_week=bookings_this_week,
     )
 
 
@@ -178,25 +149,21 @@ async def get_stats(db: AsyncSession) -> DashboardStats:
 # LEAD FUNNEL
 # ============================================
 @router.get("/funnel", response_model=DashboardLeadFunnel)
-async def get_dashboard_funnel(
-    db: AsyncSession = Depends(get_db)
-):
+async def get_dashboard_funnel(db: AsyncSession = Depends(get_db)):
     """Get lead funnel data"""
     return await get_funnel(db)
 
 
 async def get_funnel(db: AsyncSession) -> DashboardLeadFunnel:
     """Calculate lead funnel counts"""
-    
-    statuses = ['uploaded', 'contacted', 'replied', 'interested', 'booked', 'closed']
+
+    statuses = ["uploaded", "contacted", "replied", "interested", "booked", "closed"]
     funnel_data = {}
-    
+
     for status in statuses:
-        result = await db.execute(
-            select(func.count(Lead.id)).where(Lead.status == status)
-        )
+        result = await db.execute(select(func.count(Lead.id)).where(Lead.status == status))
         funnel_data[status] = result.scalar() or 0
-    
+
     return DashboardLeadFunnel(**funnel_data)
 
 
@@ -204,19 +171,16 @@ async def get_funnel(db: AsyncSession) -> DashboardLeadFunnel:
 # RECENT ACTIVITY
 # ============================================
 @router.get("/activity", response_model=list)
-async def get_dashboard_activity(
-    limit: int = 20,
-    db: AsyncSession = Depends(get_db)
-):
+async def get_dashboard_activity(limit: int = 20, db: AsyncSession = Depends(get_db)):
     """Get recent activity feed"""
     return await get_recent_activity(db, limit)
 
 
 async def get_recent_activity(db: AsyncSession, limit: int = 10) -> list:
     """Get recent activity across all entities"""
-    
+
     activities = []
-    
+
     # Recent emails sent
     emails_result = await db.execute(
         select(EmailSequence, Lead)
@@ -225,52 +189,56 @@ async def get_recent_activity(db: AsyncSession, limit: int = 10) -> list:
         .order_by(EmailSequence.sent_at.desc())
         .limit(limit)
     )
-    
+
     for seq, lead in emails_result.fetchall():
-        activities.append(DashboardRecentActivity(
-            type="email_sent",
-            lead_id=lead.id,
-            lead_name=f"{lead.first_name} {lead.last_name or ''}".strip(),
-            description=f"Email sent: {seq.email_subject[:50]}..." if seq.email_subject and len(seq.email_subject) > 50 else f"Email sent: {seq.email_subject or 'No subject'}",
-            timestamp=seq.sent_at
-        ))
-    
+        activities.append(
+            DashboardRecentActivity(
+                type="email_sent",
+                lead_id=lead.id,
+                lead_name=f"{lead.first_name} {lead.last_name or ''}".strip(),
+                description=(
+                    f"Email sent: {seq.email_subject[:50]}..."
+                    if seq.email_subject and len(seq.email_subject) > 50
+                    else f"Email sent: {seq.email_subject or 'No subject'}"
+                ),
+                timestamp=seq.sent_at,
+            )
+        )
+
     # Recent replies
     replies_result = await db.execute(
-        select(Reply, Lead)
-        .join(Lead, Reply.lead_id == Lead.id)
-        .order_by(Reply.created_at.desc())
-        .limit(limit)
+        select(Reply, Lead).join(Lead, Reply.lead_id == Lead.id).order_by(Reply.created_at.desc()).limit(limit)
     )
-    
+
     for reply, lead in replies_result.fetchall():
         sentiment_text = f" ({reply.sentiment})" if reply.sentiment else ""
-        activities.append(DashboardRecentActivity(
-            type="reply_received",
-            lead_id=lead.id,
-            lead_name=f"{lead.first_name} {lead.last_name or ''}".strip(),
-            description=f"Reply received{sentiment_text}",
-            timestamp=reply.created_at
-        ))
-    
+        activities.append(
+            DashboardRecentActivity(
+                type="reply_received",
+                lead_id=lead.id,
+                lead_name=f"{lead.first_name} {lead.last_name or ''}".strip(),
+                description=f"Reply received{sentiment_text}",
+                timestamp=reply.created_at,
+            )
+        )
+
     # Recent bookings
     bookings_result = await db.execute(
-        select(Booking, Lead)
-        .join(Lead, Booking.lead_id == Lead.id)
-        .order_by(Booking.created_at.desc())
-        .limit(limit)
+        select(Booking, Lead).join(Lead, Booking.lead_id == Lead.id).order_by(Booking.created_at.desc()).limit(limit)
     )
-    
+
     for booking, lead in bookings_result.fetchall():
         time_str = booking.scheduled_time.strftime("%b %d at %I:%M %p")
-        activities.append(DashboardRecentActivity(
-            type="booking_created",
-            lead_id=lead.id,
-            lead_name=f"{lead.first_name} {lead.last_name or ''}".strip(),
-            description=f"Meeting scheduled for {time_str}",
-            timestamp=booking.created_at
-        ))
-    
+        activities.append(
+            DashboardRecentActivity(
+                type="booking_created",
+                lead_id=lead.id,
+                lead_name=f"{lead.first_name} {lead.last_name or ''}".strip(),
+                description=f"Meeting scheduled for {time_str}",
+                timestamp=booking.created_at,
+            )
+        )
+
     # Sort all activities by timestamp and limit
     activities.sort(key=lambda x: x.timestamp, reverse=True)
     return activities[:limit]
@@ -280,65 +248,166 @@ async def get_recent_activity(db: AsyncSession, limit: int = 10) -> list:
 # CAMPAIGN OVERVIEW
 # ============================================
 @router.get("/campaigns", response_model=dict)
-async def get_campaigns_overview(
-    db: AsyncSession = Depends(get_db)
-):
+async def get_campaigns_overview(db: AsyncSession = Depends(get_db)):
     """Get quick overview of campaigns"""
-    
+
     # Count by status
-    campaigns_query = select(
-        Campaign.status, func.count(Campaign.id)
-    ).group_by(Campaign.status)
-    
+    campaigns_query = select(Campaign.status, func.count(Campaign.id)).group_by(Campaign.status)
+
     result = await db.execute(campaigns_query)
     by_status = {row[0]: row[1] for row in result.fetchall()}
-    
+
     # Get active campaigns
     active_result = await db.execute(
-        select(Campaign)
-        .where(Campaign.status == 'active')
-        .order_by(Campaign.started_at.desc())
-        .limit(5)
+        select(Campaign).where(Campaign.status == "active").order_by(Campaign.started_at.desc()).limit(5)
     )
-    active_campaigns = [
-        {
-            "id": c.id,
-            "name": c.name,
-            "started_at": c.started_at
-        }
-        for c in active_result.scalars().all()
-    ]
-    
+    active_campaigns = [{"id": c.id, "name": c.name, "started_at": c.started_at} for c in active_result.scalars().all()]
+
     total_result = await db.execute(select(func.count(Campaign.id)))
     total = total_result.scalar() or 0
-    
-    return {
-        "total": total,
-        "by_status": by_status,
-        "active_campaigns": active_campaigns
-    }
+
+    return {"total": total, "by_status": by_status, "active_campaigns": active_campaigns}
 
 
 # ============================================
 # QUICK STATS (LIGHTWEIGHT)
 # ============================================
 @router.get("/quick", response_model=dict)
-async def get_quick_stats(
-    db: AsyncSession = Depends(get_db)
-):
+async def get_quick_stats(db: AsyncSession = Depends(get_db)):
     """
     Lightweight endpoint for quick stats refresh.
-    
+
     Returns only essential counts for fast loading.
     """
     leads = await db.execute(select(func.count(Lead.id)))
     emails = await db.execute(select(func.count(EmailSequence.id)))
     replies = await db.execute(select(func.count(Reply.id)))
     bookings = await db.execute(select(func.count(Booking.id)))
-    
+
     return {
         "leads": leads.scalar() or 0,
         "emails_sent": emails.scalar() or 0,
         "replies": replies.scalar() or 0,
-        "bookings": bookings.scalar() or 0
+        "bookings": bookings.scalar() or 0,
     }
+
+
+# ============================================
+# WEEKLY INSIGHTS (AI-POWERED)
+# ============================================
+@router.get("/insights", response_model=WeeklyInsightsResponse)
+async def get_weekly_insights(db: AsyncSession = Depends(get_db)):
+    """
+    AI-generated weekly performance insights.
+
+    The LLM analyzes the last 7 days of engagement data and produces a
+    plain-English summary with highlights and actionable recommendations.
+    """
+    now = datetime.utcnow().replace(tzinfo=UTC)
+    week_ago = now - timedelta(days=7)
+    two_weeks_ago = now - timedelta(days=14)
+
+    # Current week stats
+    emails_sent_res = await db.execute(
+        select(func.count(EmailSequence.id)).where(
+            and_(
+                EmailSequence.sent_at >= week_ago,
+                EmailSequence.status.in_(["sent", "opened", "replied"]),
+            )
+        )
+    )
+    emails_sent = emails_sent_res.scalar() or 0
+
+    opens_res = await db.execute(
+        select(func.count(EmailSequence.id)).where(
+            and_(EmailSequence.opened_at >= week_ago)
+        )
+    )
+    opens = opens_res.scalar() or 0
+
+    replies_res = await db.execute(
+        select(func.count(EmailSequence.id)).where(
+            and_(EmailSequence.replied_at >= week_ago)
+        )
+    )
+    replies_count = replies_res.scalar() or 0
+
+    bookings_res = await db.execute(
+        select(func.count(Booking.id)).where(Booking.created_at >= week_ago)
+    )
+    bookings = bookings_res.scalar() or 0
+
+    # Previous week stats (for comparison)
+    prev_emails_res = await db.execute(
+        select(func.count(EmailSequence.id)).where(
+            and_(
+                EmailSequence.sent_at >= two_weeks_ago,
+                EmailSequence.sent_at < week_ago,
+                EmailSequence.status.in_(["sent", "opened", "replied"]),
+            )
+        )
+    )
+    prev_emails = prev_emails_res.scalar() or 0
+
+    prev_opens_res = await db.execute(
+        select(func.count(EmailSequence.id)).where(
+            and_(
+                EmailSequence.opened_at >= two_weeks_ago,
+                EmailSequence.opened_at < week_ago,
+            )
+        )
+    )
+    prev_opens = prev_opens_res.scalar() or 0
+
+    # SMS and Voice counts
+    sms_res = await db.execute(
+        select(func.count(SmsMessage.id)).where(SmsMessage.created_at >= week_ago)
+    )
+    sms_sent = sms_res.scalar() or 0
+
+    voice_res = await db.execute(
+        select(func.count(VoiceCall.id)).where(VoiceCall.created_at >= week_ago)
+    )
+    voice_calls = voice_res.scalar() or 0
+
+    # Top campaign (most emails in the period)
+    top_campaign_res = await db.execute(
+        select(Campaign.name, func.count(EmailSequence.id).label("cnt"))
+        .join(EmailSequence, EmailSequence.created_at >= week_ago, isouter=True)
+        .group_by(Campaign.name)
+        .order_by(func.count(EmailSequence.id).desc())
+        .limit(1)
+    )
+    top_row = top_campaign_res.first()
+    top_campaign = top_row[0] if top_row else "N/A"
+
+    open_rate = (opens / emails_sent * 100) if emails_sent else 0.0
+    reply_rate = (replies_count / emails_sent * 100) if emails_sent else 0.0
+    prev_open_rate = (prev_opens / prev_emails * 100) if prev_emails else 0.0
+
+    stats_snapshot = {
+        "emails_sent": emails_sent,
+        "opens": opens,
+        "replies": replies_count,
+        "bookings": bookings,
+        "open_rate": round(open_rate, 1),
+        "reply_rate": round(reply_rate, 1),
+        "prev_week_open_rate": round(prev_open_rate, 1),
+        "prev_week_reply_rate": 0.0,
+        "top_campaign": top_campaign,
+        "sms_sent": sms_sent,
+        "voice_calls": voice_calls,
+    }
+
+    ai_result = await generate_weekly_insights(stats_snapshot)
+
+    period_start = (now - timedelta(days=7)).strftime("%b %d")
+    period_end = now.strftime("%b %d, %Y")
+
+    return WeeklyInsightsResponse(
+        period=f"{period_start} - {period_end}",
+        summary=ai_result.get("summary", ""),
+        highlights=ai_result.get("highlights", []),
+        recommendations=ai_result.get("recommendations", []),
+        stats_snapshot=stats_snapshot,
+    )

@@ -1,0 +1,45 @@
+# Render Blueprint – Real Estate Outreach Automation System (monorepo)
+# Deploys: PostgreSQL (free), Backend (FastAPI), Frontend (Next.js)
+# Docs: https://render.com/docs/blueprint-spec
+
+databases:
+  - name: realestate-db
+    plan: free
+    databaseName: realestate
+
+services:
+  # ─── Backend (FastAPI) ───
+  - type: web
+    name: realestate-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: realestate-db
+          property: connectionString
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      # Optional: set in Dashboard for full functionality (CORS defaults include Render frontend URL)
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
+  # ─── Frontend (Next.js) ───
+  - type: web
+    name: realestate-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    envVars:
+      # Set this to your backend URL after first deploy, e.g. https://realestate-backend.onrender.com
+      - key: NEXT_PUBLIC_API_URL
+        sync: false

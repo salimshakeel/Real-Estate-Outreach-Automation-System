@@ -1,1075 +1,964 @@
-# Frontend API Documentation
+# Frontend API Documentation — New Endpoints Only
 
-**Base URL:** `http://localhost:8000`  
-**Interactive Docs:** `http://localhost:8000/docs`
+**Base URL:** `http://localhost:8000`
+
+This document covers **only the new endpoints** added after the initial CRUD system. These are: AI Lead Scoring, AI Campaign Generation & A/B Testing, Chatbot, SMS, Voice Calls, AI Weekly Insights, Demo Utilities, and Webhooks.
+
+The previous endpoints (Leads CRUD, Templates CRUD, Campaigns CRUD, basic Dashboard) are already documented separately and remain unchanged.
 
 ---
 
 # Table of Contents
 
-1. [Health Check](#health-check)
-2. [Leads](#leads)
-3. [Templates](#templates)
-4. [Campaigns](#campaigns)
-5. [Dashboard](#dashboard)
+1. [AI Lead Scoring](#1-ai-lead-scoring)
+2. [AI Campaign Generation & A/B Testing](#2-ai-campaign-generation--ab-testing)
+3. [Chatbot](#3-chatbot)
+4. [SMS](#4-sms)
+5. [Voice Calls](#5-voice-calls)
+6. [AI Weekly Insights](#6-ai-weekly-insights)
+7. [Config Update](#7-config-update)
+8. [Demo Utilities](#8-demo-utilities)
+9. [Webhooks](#9-webhooks)
+10. [New Data Models & Status Values](#10-new-data-models--status-values)
+11. [Frontend Integration Guide](#11-frontend-integration-guide)
 
 ---
 
-# Health Check
+# 1. AI Lead Scoring
 
-## GET `/`
+Scores leads using AI against an ideal customer profile. With OpenAI configured, the LLM reasons about each lead. Without it, a rule-based fallback runs (phone +10, address +10, value >$500K +20, etc.).
 
-**Purpose:** Root endpoint - API welcome message
+Scores are persisted in the `ai_lead_scores` table — one row per lead, upserted on each call.
+
+---
+
+## POST `/api/leads/score`
+
+Score a single lead.
+
+**Request:**
+```json
+{
+  "lead_id": 1,
+  "icp_description": "Commercial property managers in South Florida with portfolios above $500K"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| lead_id | int | Yes | Lead to score |
+| icp_description | string | No | Ideal customer profile text. Makes scoring more accurate when provided. |
 
 **Response:**
 ```json
 {
-  "message": "Real Estate Outreach API",
-  "version": "1.0.0",
-  "docs": "/docs"
+  "result": {
+    "lead_id": 1,
+    "score": 78,
+    "priority": "Hot",
+    "reasoning": "Lead manages a multi-unit property in Miami valued at $720K. Strong match to ICP — commercial property manager in South Florida with high-value portfolio.",
+    "recommended_campaign": "premium-property-outreach",
+    "personalization_hints": "Reference their Coral Gables location and Single Family property type. Lead with ROI data for similar recent sales."
+  }
 }
 ```
+
+**Priority mapping:**
+
+| Score | Priority | Color suggestion |
+|-------|----------|-----------------|
+| 75-100 | Hot | Red / `#EF4444` |
+| 50-74 | Warm | Orange / `#F59E0B` |
+| 25-49 | Cold | Blue / `#3B82F6` |
+| 0-24 | Dead | Gray / `#6B7280` |
+
+**How to show in frontend:**
+- On the lead detail page, show a score card with the number (0-100), a colored priority badge, and the reasoning text below.
+- The `recommended_campaign` can be shown as a suggestion chip.
+- `personalization_hints` can appear as a tooltip or info box when composing emails/SMS to this lead.
 
 ---
 
-## GET `/health`
+## POST `/api/leads/score/bulk`
 
-**Purpose:** Check if server is running
+Score multiple leads at once.
 
-**Response:**
+**Request:**
 ```json
 {
-  "status": "healthy",
-  "timestamp": "2026-01-30T10:30:00.000Z"
+  "lead_ids": [1, 2, 3, 4, 5],
+  "icp_description": "Commercial property managers in South Florida"
 }
 ```
-
----
-
-## GET `/config`
-
-**Purpose:** Get non-sensitive app configuration
-
-**Response:**
-```json
-{
-  "app_name": "Real Estate Outreach API",
-  "version": "1.0.0",
-  "environment": "development",
-  "debug": true,
-  "sendgrid_configured": false,
-  "openai_configured": false
-}
-```
-
----
-
-# Leads
-
-## POST `/api/leads/upload`
-
-**Purpose:** Upload CSV file with leads
-
-**Content-Type:** `multipart/form-data`
-
-**Input:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| file | File | Yes | CSV file with leads |
-
-**CSV Columns (flexible mapping):**
-| Column | Required | Aliases |
-|--------|----------|---------|
-| email | Yes | Email, EMAIL, e-mail |
-| first_name | Yes | FirstName, First Name, first |
-| last_name | No | LastName, Last Name, last |
-| phone | No | Phone, PHONE, telephone |
-| address | No | Address, ADDRESS, property_address |
-| property_type | No | PropertyType, Property Type, type |
-| estimated_value | No | EstimatedValue, Value, price |
-| company | No | Company, COMPANY, organization |
-
-**Response (Success):**
-```json
-{
-  "filename": "leads.csv",
-  "total_rows": 50,
-  "valid_rows": 48,
-  "invalid_rows": 2,
-  "duplicates": 3,
-  "created": 45,
-  "errors": [
-    "Row 5: Invalid email format",
-    "Row 12: Missing required field 'first_name'"
-  ]
-}
-```
-
----
-
-## GET `/api/leads`
-
-**Purpose:** Get paginated list of leads
-
-**Query Parameters:**
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| page | int | 1 | Page number (starts at 1) |
-| per_page | int | 20 | Items per page (max 100) |
-| status | string | null | Filter by status |
-| search | string | null | Search by email or name |
-
-**Status Values:** `uploaded`, `contacted`, `replied`, `interested`, `booked`, `closed`
-
-**Example Request:**
-```
-GET /api/leads?page=1&per_page=10&status=contacted&search=john
-```
-
-**Response:**
-```json
-{
-  "total": 150,
-  "page": 1,
-  "per_page": 10,
-  "total_pages": 15,
-  "items": [
-    {
-      "id": 1,
-      "email": "john.doe@example.com",
-      "first_name": "John",
-      "last_name": "Doe",
-      "company": "ABC Realty",
-      "phone": "555-1234",
-      "address": "123 Oak Street, Miami FL",
-      "property_type": "Single Family",
-      "estimated_value": "$450,000",
-      "status": "contacted",
-      "notes": null,
-      "created_by": null,
-      "created_at": "2026-01-30T10:00:00.000Z",
-      "updated_at": "2026-01-30T10:00:00.000Z"
-    }
-  ]
-}
-```
-
----
-
-## GET `/api/leads/{lead_id}`
-
-**Purpose:** Get single lead with full history
-
-**Path Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| lead_id | int | Yes | Lead ID |
-
-**Response:**
-```json
-{
-  "lead": {
-    "id": 1,
-    "email": "john.doe@example.com",
-    "first_name": "John",
-    "last_name": "Doe",
-    "company": "ABC Realty",
-    "phone": "555-1234",
-    "address": "123 Oak Street, Miami FL",
-    "property_type": "Single Family",
-    "estimated_value": "$450,000",
-    "status": "replied",
-    "notes": "Interested in selling Q2",
-    "created_by": null,
-    "created_at": "2026-01-30T10:00:00.000Z",
-    "updated_at": "2026-01-30T12:00:00.000Z"
-  },
-  "email_sequences": [
-    {
-      "id": 1,
-      "sequence_day": 1,
-      "email_subject": "Quick question about 123 Oak Street",
-      "status": "sent",
-      "sent_at": "2026-01-30T10:30:00.000Z",
-      "opened_at": "2026-01-30T11:00:00.000Z",
-      "replied_at": "2026-01-30T12:00:00.000Z"
-    }
-  ],
-  "replies": [
-    {
-      "id": 1,
-      "email_from": "john.doe@example.com",
-      "email_subject": "Re: Quick question about 123 Oak Street",
-      "email_body": "Yes, I'm interested in discussing...",
-      "sentiment": "interested",
-      "confidence_score": 0.92,
-      "received_at": "2026-01-30T12:00:00.000Z"
-    }
-  ],
-  "bookings": [
-    {
-      "id": 1,
-      "scheduled_time": "2026-02-05T14:00:00.000Z",
-      "calendly_response_status": "confirmed"
-    }
-  ]
-}
-```
-
----
-
-## POST `/api/leads`
-
-**Purpose:** Create a single lead manually
-
-**Content-Type:** `application/json`
-
-**Request Body:**
-| Field | Type | Required | Validation |
-|-------|------|----------|------------|
-| email | string | Yes | Valid email format |
-| first_name | string | Yes | 1-100 characters |
-| last_name | string | No | Max 100 characters |
-| company | string | No | Max 100 characters |
-| phone | string | No | Max 20 characters |
-| address | string | No | Max 255 characters |
-| property_type | string | No | Max 100 characters |
-| estimated_value | string | No | Max 50 characters |
-| notes | string | No | Any length |
-| created_by | string | No | Max 100 characters |
-
-**Example Request:**
-```json
-{
-  "email": "jane.smith@example.com",
-  "first_name": "Jane",
-  "last_name": "Smith",
-  "phone": "555-5678",
-  "address": "456 Pine Avenue, Miami FL",
-  "property_type": "Condo",
-  "estimated_value": "$320,000"
-}
-```
-
-**Response:**
-```json
-{
-  "id": 51,
-  "email": "jane.smith@example.com",
-  "first_name": "Jane",
-  "last_name": "Smith",
-  "company": null,
-  "phone": "555-5678",
-  "address": "456 Pine Avenue, Miami FL",
-  "property_type": "Condo",
-  "estimated_value": "$320,000",
-  "status": "uploaded",
-  "notes": null,
-  "created_by": null,
-  "created_at": "2026-01-30T10:00:00.000Z",
-  "updated_at": "2026-01-30T10:00:00.000Z"
-}
-```
-
----
-
-## PUT `/api/leads/{lead_id}`
-
-**Purpose:** Update an existing lead
-
-**Path Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| lead_id | int | Yes | Lead ID |
-
-**Request Body:** (all fields optional)
-| Field | Type | Validation |
-|-------|------|------------|
-| email | string | Valid email format |
-| first_name | string | Max 100 characters |
-| last_name | string | Max 100 characters |
-| company | string | Max 100 characters |
-| phone | string | Max 20 characters |
-| address | string | Max 255 characters |
-| property_type | string | Max 100 characters |
-| estimated_value | string | Max 50 characters |
-| status | string | One of: uploaded, contacted, replied, interested, booked, closed |
-| notes | string | Any length |
-
-**Example Request:**
-```json
-{
-  "status": "interested",
-  "notes": "Very interested, wants to meet next week"
-}
-```
-
-**Response:** Updated lead object (same as POST response)
-
----
-
-## DELETE `/api/leads/{lead_id}`
-
-**Purpose:** Delete a lead (cascades to related records)
-
-**Path Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| lead_id | int | Yes | Lead ID |
-
-**Response:**
-```json
-{
-  "message": "Lead 'john.doe@example.com' deleted successfully",
-  "success": true
-}
-```
-
----
-
-## GET `/api/leads/template/csv`
-
-**Purpose:** Download sample CSV template
-
-**Response:** CSV file download
-
-**File Content:**
-```csv
-email,first_name,last_name,phone,address,property_type,estimated_value,company
-john.doe@example.com,John,Doe,555-1234,123 Main St,Single Family,$450000,ABC Corp
-```
-
----
-
-# Templates
-
-## POST `/api/templates`
-
-**Purpose:** Create a new email template
-
-**Request Body:**
-| Field | Type | Required | Validation |
-|-------|------|----------|------------|
-| name | string | Yes | 1-255 characters, unique |
-| subject | string | Yes | 1-255 characters |
-| body | string | Yes | Min 1 character |
-| is_default | boolean | No | Default: false |
-| created_by | string | No | Max 100 characters |
-
-**Placeholders Available:**
-- `{{first_name}}` - Lead's first name
-- `{{last_name}}` - Lead's last name
-- `{{full_name}}` - First + Last name
-- `{{email}}` - Lead's email
-- `{{phone}}` - Lead's phone
-- `{{address}}` - Property address
-- `{{property_type}}` - Property type
-- `{{estimated_value}}` - Estimated value
-
-**Example Request:**
-```json
-{
-  "name": "Initial Outreach",
-  "subject": "Quick question about {{address}}",
-  "body": "Hi {{first_name}},\n\nI noticed your property at {{address}} and wanted to reach out.\n\nWould you be open to a quick chat?\n\nBest regards",
-  "is_default": true
-}
-```
-
-**Response:**
-```json
-{
-  "id": 1,
-  "name": "Initial Outreach",
-  "subject": "Quick question about {{address}}",
-  "body": "Hi {{first_name}},\n\nI noticed your property...",
-  "is_default": true,
-  "created_by": null,
-  "created_at": "2026-01-30T10:00:00.000Z",
-  "updated_at": "2026-01-30T10:00:00.000Z"
-}
-```
-
----
-
-## GET `/api/templates`
-
-**Purpose:** Get all templates with pagination
-
-**Query Parameters:**
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| page | int | 1 | Page number |
-| per_page | int | 20 | Items per page (max 100) |
-| search | string | null | Search by name |
 
 **Response:**
 ```json
 {
   "total": 5,
-  "page": 1,
-  "per_page": 20,
-  "total_pages": 1,
-  "items": [
+  "scored": 5,
+  "results": [
     {
-      "id": 1,
-      "name": "Initial Outreach",
-      "subject": "Quick question about {{address}}",
-      "body": "Hi {{first_name}}...",
-      "is_default": true,
-      "created_by": null,
-      "created_at": "2026-01-30T10:00:00.000Z",
-      "updated_at": "2026-01-30T10:00:00.000Z"
+      "lead_id": 1,
+      "score": 78,
+      "priority": "Hot",
+      "reasoning": "Strong match...",
+      "recommended_campaign": "premium-property-outreach",
+      "personalization_hints": "Reference their Coral Gables location..."
+    },
+    {
+      "lead_id": 2,
+      "score": 42,
+      "priority": "Cold",
+      "reasoning": "Limited data available...",
+      "recommended_campaign": "general-outreach",
+      "personalization_hints": "Use generic real estate angle..."
     }
   ]
 }
 ```
 
----
-
-## GET `/api/templates/{template_id}`
-
-**Purpose:** Get single template
-
-**Path Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| template_id | int | Yes | Template ID |
-
-**Response:** Single template object
+**How to show in frontend:**
+- Add a "Score All Leads with AI" button on the leads list page. When clicked, collect all visible lead IDs and call this endpoint.
+- Show a modal with an ICP text input before scoring: "Describe your ideal customer (optional)".
+- After scoring, add a `priority` column to the leads table. Make it sortable so Hot leads float to the top.
+- Show a toast/notification: "5 leads scored — 2 Hot, 1 Warm, 2 Cold".
 
 ---
 
-## GET `/api/templates/default/active`
+# 2. AI Campaign Generation & A/B Testing
 
-**Purpose:** Get the default template
-
-**Response:** Single template object (or 404 if no default set)
+These three endpoints handle the AI email generation workflow: generate 5 variations, view their performance, and analyze the winner.
 
 ---
 
-## PUT `/api/templates/{template_id}`
+## POST `/api/campaigns/{campaign_id}/generate`
 
-**Purpose:** Update a template
+AI generates 5 email variations (A through E) for a campaign. Each targets a different psychological trigger. The system automatically reads past learned patterns from the `ai_patterns` table and feeds them into the prompt.
 
-**Request Body:** (all fields optional)
-| Field | Type | Validation |
-|-------|------|------------|
-| name | string | Max 255 characters |
-| subject | string | Max 255 characters |
-| body | string | Any length |
-| is_default | boolean | Sets as default (unsets others) |
-
-**Response:** Updated template object
-
----
-
-## DELETE `/api/templates/{template_id}`
-
-**Purpose:** Delete a template
-
-**Response:**
+**Request:**
 ```json
 {
-  "message": "Template 'Initial Outreach' deleted successfully",
-  "success": true
+  "campaign_id": 1,
+  "target_audience": "Property managers in South Florida with portfolios above $500K",
+  "goal": "Book a 15-minute discovery call",
+  "pain_point": "Low response rates from cold outreach",
+  "tone": "professional but conversational",
+  "max_word_count": 150
 }
 ```
 
----
-
-## POST `/api/templates/{template_id}/preview`
-
-**Purpose:** Preview template with sample data
-
-**Path Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| template_id | int | Yes | Template ID |
-
-**Request Body:** (optional - custom sample data)
-```json
-{
-  "first_name": "John",
-  "last_name": "Doe",
-  "email": "john@example.com",
-  "address": "123 Oak Street"
-}
-```
-
-**Response:**
-```json
-{
-  "template_id": 1,
-  "template_name": "Initial Outreach",
-  "original": {
-    "subject": "Quick question about {{address}}",
-    "body": "Hi {{first_name}}..."
-  },
-  "personalized": {
-    "subject": "Quick question about 123 Oak Street",
-    "body": "Hi John..."
-  },
-  "placeholders_found": ["first_name", "address"],
-  "sample_data_used": {
-    "first_name": "John",
-    "address": "123 Oak Street"
-  }
-}
-```
-
----
-
-## POST `/api/templates/seed/defaults`
-
-**Purpose:** Create default starter templates
-
-**Response:**
-```json
-{
-  "message": "Created 3 default templates",
-  "success": true
-}
-```
-
-**Templates Created:**
-1. "Initial Outreach" (default)
-2. "Follow Up #1"
-3. "Market Update"
-
----
-
-# Campaigns
-
-## POST `/api/campaigns`
-
-**Purpose:** Create a new campaign (draft status)
-
-**Request Body:**
-| Field | Type | Required | Validation |
-|-------|------|----------|------------|
-| name | string | Yes | 1-255 characters |
-| description | string | No | Any length |
-| email_template | string | No | Raw template text |
-| created_by | string | No | Max 100 characters |
-
-**Example Request:**
-```json
-{
-  "name": "Q1 2026 Outreach",
-  "description": "First quarter outreach to Miami properties"
-}
-```
-
-**Response:**
-```json
-{
-  "id": 1,
-  "name": "Q1 2026 Outreach",
-  "description": "First quarter outreach to Miami properties",
-  "email_template": null,
-  "status": "draft",
-  "started_at": null,
-  "ended_at": null,
-  "created_by": null,
-  "created_at": "2026-01-30T10:00:00.000Z",
-  "updated_at": "2026-01-30T10:00:00.000Z"
-}
-```
-
----
-
-## GET `/api/campaigns`
-
-**Purpose:** Get all campaigns with pagination
-
-**Query Parameters:**
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| page | int | 1 | Page number |
-| per_page | int | 20 | Items per page (max 100) |
-| status | string | null | Filter: draft, scheduled, active, completed, paused |
-| search | string | null | Search by name |
-
-**Response:**
-```json
-{
-  "total": 3,
-  "page": 1,
-  "per_page": 20,
-  "total_pages": 1,
-  "items": [
-    {
-      "id": 1,
-      "name": "Q1 2026 Outreach",
-      "description": "First quarter outreach",
-      "email_template": null,
-      "status": "active",
-      "started_at": "2026-01-30T10:30:00.000Z",
-      "ended_at": null,
-      "created_by": null,
-      "created_at": "2026-01-30T10:00:00.000Z",
-      "updated_at": "2026-01-30T10:30:00.000Z"
-    }
-  ]
-}
-```
-
----
-
-## GET `/api/campaigns/{campaign_id}`
-
-**Purpose:** Get campaign with statistics
-
-**Path Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| campaign_id | int | Yes | Campaign ID |
-
-**Response:**
-```json
-{
-  "campaign": {
-    "id": 1,
-    "name": "Q1 2026 Outreach",
-    "status": "active",
-    "started_at": "2026-01-30T10:30:00.000Z"
-  },
-  "stats": {
-    "total_leads": 50,
-    "emails_sent": 48,
-    "emails_opened": 25,
-    "emails_replied": 8,
-    "emails_bounced": 2,
-    "open_rate": 52.08,
-    "reply_rate": 16.67
-  }
-}
-```
-
----
-
-## PUT `/api/campaigns/{campaign_id}`
-
-**Purpose:** Update campaign details
-
-**Request Body:** (all fields optional)
-| Field | Type | Validation |
-|-------|------|------------|
-| name | string | Max 255 characters |
-| description | string | Any length |
-| email_template | string | Any length |
-| status | string | draft, scheduled, paused, completed (not active) |
-
-**Note:** Cannot change status to "active" via this endpoint. Use `/start` instead.
-
----
-
-## DELETE `/api/campaigns/{campaign_id}`
-
-**Purpose:** Delete campaign (only if not active)
-
-**Response:**
-```json
-{
-  "message": "Campaign 'Q1 2026 Outreach' deleted successfully",
-  "success": true
-}
-```
-
----
-
-## POST `/api/campaigns/{campaign_id}/start`
-
-**Purpose:** Start campaign - send emails to leads
-
-**Path Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| campaign_id | int | Yes | Campaign ID |
-
-**Request Body:**
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| lead_ids | array[int] | Yes | List of lead IDs to email |
-| email_template_id | int | No* | Template to use |
-| subject | string | No* | Custom subject |
-| body | string | No* | Custom body |
-
-*Either `email_template_id` OR both `subject` and `body` required
-
-**Example Request (using template):**
-```json
-{
-  "lead_ids": [1, 2, 3, 4, 5],
-  "email_template_id": 1
-}
-```
-
-**Example Request (custom email):**
-```json
-{
-  "lead_ids": [1, 2, 3],
-  "subject": "Hi {{first_name}}, about your property",
-  "body": "Hello {{first_name}},\n\nI wanted to reach out about {{address}}..."
-}
-```
+| campaign_id | int | Yes | Must match URL parameter |
+| target_audience | string | Yes | Who the emails target |
+| goal | string | Yes | What you want the lead to do |
+| pain_point | string | No | The problem to address. Default: "low engagement" |
+| tone | string | No | Default: "professional but conversational" |
+| max_word_count | int | No | Default: 150 |
 
 **Response:**
 ```json
 {
   "campaign_id": 1,
-  "total_leads": 5,
-  "emails_sent": 5,
-  "emails_failed": 0,
-  "details": [
+  "variations": [
     {
-      "lead_id": 1,
-      "email": "john@example.com",
-      "success": true,
-      "message_id": "mock_abc123"
+      "label": "A",
+      "subject": "Is your Miami portfolio leaving money on the table?",
+      "body": "Hi {{first_name}},\n\nProperty managers in South Florida are seeing 20% higher yields...",
+      "psychological_trigger": "curiosity"
     },
     {
-      "lead_id": 2,
-      "email": "jane@example.com",
-      "success": true,
-      "message_id": "mock_def456"
+      "label": "B",
+      "subject": "3 property managers just booked — spots filling fast",
+      "body": "Hi {{first_name}},\n\nWe're working with select property managers this quarter...",
+      "psychological_trigger": "urgency"
+    },
+    {
+      "label": "C",
+      "subject": "How Pinnacle Realty boosted their portfolio ROI by 35%",
+      "body": "Hi {{first_name}},\n\nOne of our clients was in a similar position...",
+      "psychological_trigger": "social_proof"
+    },
+    {
+      "label": "D",
+      "subject": "Your competitors are using this — are you?",
+      "body": "Hi {{first_name}},\n\nOther property managers in South Florida...",
+      "psychological_trigger": "fear_of_missing_out"
+    },
+    {
+      "label": "E",
+      "subject": "Expert insight for {{property_type}} portfolios",
+      "body": "Hi {{first_name}},\n\nBased on our analysis of the South Florida market...",
+      "psychological_trigger": "authority"
     }
   ],
-  "campaign": {
+  "patterns_used": 3
+}
+```
+
+**How to show in frontend:**
+- After creating a campaign, show a "Generate with AI" button that opens a form with the fields above.
+- Display the 5 variations as tabs (A | B | C | D | E) or cards.
+- Each card shows: label, subject line, body preview, and a trigger badge (e.g. "curiosity" in purple, "urgency" in red).
+- Show `patterns_used` as "AI used 3 learned patterns from past campaigns" at the top.
+- Let the user edit each variation before starting the campaign.
+- The bodies contain `{{first_name}}` etc. — show these as highlighted placeholder chips in the editor.
+
+---
+
+## GET `/api/campaigns/{campaign_id}/variations`
+
+Get all variations for a campaign with live engagement stats.
+
+**Response:**
+```json
+[
+  {
     "id": 1,
-    "name": "Q1 2026 Outreach",
-    "status": "active",
-    "started_at": "2026-01-30T10:30:00.000Z"
+    "label": "A",
+    "subject": "Is your Miami portfolio leaving money on the table?",
+    "body": "Hi {{first_name}}...",
+    "psychological_trigger": "curiosity",
+    "sends": 100,
+    "opens": 42,
+    "clicks": 15,
+    "replies": 8,
+    "is_winner": false,
+    "open_rate": 42.0,
+    "reply_rate": 8.0,
+    "created_at": "2026-02-01T10:00:00"
+  },
+  {
+    "id": 2,
+    "label": "B",
+    "subject": "3 property managers just booked...",
+    "body": "Hi {{first_name}}...",
+    "psychological_trigger": "urgency",
+    "sends": 100,
+    "opens": 55,
+    "clicks": 20,
+    "replies": 12,
+    "is_winner": true,
+    "open_rate": 55.0,
+    "reply_rate": 12.0,
+    "created_at": "2026-02-01T10:00:00"
+  }
+]
+```
+
+**How to show in frontend:**
+- On the campaign detail page, show a "Variations" tab with a comparison table:
+
+| Variation | Subject | Sends | Opens | Open Rate | Replies | Reply Rate | Winner |
+|-----------|---------|-------|-------|-----------|---------|------------|--------|
+| A | Is your Miami portfolio... | 100 | 42 | 42.0% | 8 | 8.0% | |
+| **B** | **3 property managers...** | **100** | **55** | **55.0%** | **12** | **12.0%** | **Trophy icon** |
+
+- Use progress bars for open_rate and reply_rate columns.
+- Highlight the `is_winner: true` row with a gold border or trophy icon.
+- If no winner yet (all `is_winner: false`), show an "Analyze Results" button.
+
+---
+
+## POST `/api/campaigns/{campaign_id}/analyze`
+
+AI analyzes the A/B test. Picks a winner using weighted scoring: replies 50%, opens 30%, clicks 20%. Saves the learned pattern to the database so future campaigns get smarter.
+
+**Request:** No body needed — reads variations from the database.
+
+**Response:**
+```json
+{
+  "campaign_id": 1,
+  "winner_label": "B",
+  "winner_subject": "3 property managers just booked — spots filling fast",
+  "winner_body": "Hi {{first_name}},\n\nWe're working with select property managers...",
+  "explanation": "Variation B dominated across all weighted metrics. Its urgency-driven subject line achieved a 55% open rate (vs 42% average) and 12% reply rate (vs 6% average). The scarcity framing created FOMO that drove action.",
+  "pattern_learned": "Urgency-based subject lines with specific social proof numbers outperform curiosity and authority angles by 2-3x in South Florida property manager outreach.",
+  "stats": {
+    "A": { "sends": 100, "opens": 42, "clicks": 15, "replies": 8 },
+    "B": { "sends": 100, "opens": 55, "clicks": 20, "replies": 12 },
+    "C": { "sends": 100, "opens": 38, "clicks": 12, "replies": 5 },
+    "D": { "sends": 100, "opens": 45, "clicks": 18, "replies": 7 },
+    "E": { "sends": 100, "opens": 35, "clicks": 10, "replies": 4 }
   }
 }
 ```
 
----
-
-## POST `/api/campaigns/{campaign_id}/pause`
-
-**Purpose:** Pause an active campaign
-
-**Response:** Updated campaign object with status: "paused"
-
----
-
-## POST `/api/campaigns/{campaign_id}/resume`
-
-**Purpose:** Resume a paused campaign
-
-**Response:** Updated campaign object with status: "active"
+**How to show in frontend:**
+- Show "Analyze A/B Results" button on campaigns that have variations.
+- After analysis, display a results card:
+  - Winner badge: "Winner: Variation B — Urgency"
+  - Explanation paragraph (the `explanation` field)
+  - A bar chart comparing all 5 variations (sends, opens, replies)
+  - "New AI Learning" callout box showing `pattern_learned` with a brain icon
+  - The `stats` object can power the chart directly
 
 ---
 
-## POST `/api/campaigns/{campaign_id}/complete`
+# 3. Chatbot
 
-**Purpose:** Mark campaign as completed
-
-**Response:** Updated campaign object with status: "completed" and ended_at timestamp
+Real-time AI sales chatbot. Uses OpenAI when configured, rule-based fallback in demo mode. Messages are persisted in the `chatbot_messages` table.
 
 ---
 
-## GET `/api/campaigns/{campaign_id}/emails`
+## POST `/api/chatbot/message`
 
-**Purpose:** Get emails sent in this campaign
+Send a message and get an AI reply.
 
-**Query Parameters:**
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| page | int | 1 | Page number |
-| per_page | int | 50 | Items per page |
-| status | string | null | Filter: pending, scheduled, sent, opened, replied, bounced |
+**Request:**
+```json
+{
+  "lead_id": 1,
+  "messages": [
+    { "role": "user", "content": "Hi, I got your email about my property" },
+    { "role": "assistant", "content": "Hi John! Great to hear from you. What questions do you have?" },
+    { "role": "user", "content": "What's the pricing for your service?" }
+  ],
+  "lead_score": 65,
+  "industry": "real_estate",
+  "source": "email_click",
+  "last_email_summary": "Initial outreach about 123 Oak Street property"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| lead_id | int | Yes | Lead in the conversation |
+| messages | array | Yes | Full conversation history. Each item: `{ role: "user"/"assistant", content: "..." }` |
+| lead_score | int | No | Current score for context |
+| industry | string | No | Lead's industry |
+| source | string | No | How they arrived: `email_open`, `email_click`, `manual` |
+| last_email_summary | string | No | Summary of last email sent to them |
 
 **Response:**
 ```json
 {
-  "campaign": {
-    "id": 1,
-    "name": "Q1 2026 Outreach"
+  "reply": "Great question on pricing. Before I can give you an accurate picture, how many properties are you currently managing?",
+  "next_action": {
+    "type": "continue",
+    "reason": "Pricing question — qualifying with team-size question."
   },
-  "page": 1,
-  "per_page": 50,
-  "emails": [
+  "updated_lead_score": 70
+}
+```
+
+**`next_action.type` values and what frontend should do:**
+
+| Type | Frontend Action |
+|------|----------------|
+| `continue` | Keep the chat open, wait for next user message |
+| `book_meeting` | Show a "Book a Demo" CTA button below the reply |
+| `escalate_human` | Show a "Connect with a Human" button below the reply |
+| `end` | Show a "Conversation ended" message, disable input |
+
+**How to show in frontend:**
+- Build a chat widget — either a bottom-right floating panel or a full section on the lead detail page.
+- Send the **entire conversation history** with each request (the backend doesn't maintain state between calls — it needs all messages each time).
+- Display messages as bubbles: user on right, assistant on left.
+- After each assistant reply, check `next_action.type` and show the appropriate CTA.
+- If `updated_lead_score` is returned and different from current, update the lead's score display.
+
+---
+
+## GET `/api/chatbot/history/{lead_id}`
+
+Get full chat history for a lead (oldest to newest).
+
+**Response:**
+```json
+{
+  "lead_id": 1,
+  "messages": [
+    { "role": "user", "content": "Hi, I got your email" },
+    { "role": "assistant", "content": "Hi John! Great to hear from you..." },
+    { "role": "user", "content": "What's the pricing?" },
+    { "role": "assistant", "content": "Great question on pricing..." }
+  ]
+}
+```
+
+**How to show in frontend:**
+- Call this when opening a chat for a returning lead. Pre-populate the chat widget with the history so the conversation continues seamlessly.
+
+---
+
+# 4. SMS
+
+Send SMS to leads via Twilio. In demo mode (no Twilio keys), messages are logged as `status: "mock"` and stored in the database.
+
+---
+
+## POST `/api/sms/send`
+
+Send an SMS to a lead.
+
+**Request:**
+```json
+{
+  "lead_id": 1,
+  "body": "Hi {{first_name}}, following up on my email about {{address}}. Would a quick call this week work?",
+  "personalize": true
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| lead_id | int | Yes | Lead to SMS. Must have a phone number. |
+| body | string | Yes | Message text, max 1600 chars. Supports `{{first_name}}`, `{{last_name}}`, `{{email}}`, `{{phone}}`, `{{address}}`, `{{property_type}}`, `{{estimated_value}}` |
+| personalize | bool | No | Default: true. Replaces placeholders with lead data. |
+
+**Response (success):**
+```json
+{
+  "success": true,
+  "lead_id": 1,
+  "sms_message_id": 5,
+  "twilio_sid": "SM1234567890abcdef",
+  "status": "sent",
+  "error": null,
+  "message": "SMS sent"
+}
+```
+
+**Response (demo mode):**
+```json
+{
+  "success": true,
+  "lead_id": 1,
+  "sms_message_id": 5,
+  "twilio_sid": null,
+  "status": "mock",
+  "error": null,
+  "message": "SMS sent"
+}
+```
+
+**Response (error — no phone):**
+```json
+// HTTP 400
+{ "detail": "Lead has no phone number; add a phone before sending SMS." }
+```
+
+**How to show in frontend:**
+- On the lead detail page, add a "Send SMS" button (only enabled if lead has a phone number).
+- Open a compose modal with a text area for the message body.
+- Show placeholder buttons ({{first_name}}, {{address}}, etc.) that insert into the text area on click.
+- After sending, show a toast: "SMS sent to +1555..." or the error message.
+- If `status: "mock"`, show a small "Demo Mode" badge on the toast.
+
+---
+
+## GET `/api/sms/history/{lead_id}`
+
+Get all SMS messages sent to a lead (oldest first).
+
+**Response:**
+```json
+{
+  "lead_id": 1,
+  "messages": [
     {
-      "id": 1,
+      "id": 5,
       "lead_id": 1,
-      "lead_name": "John Doe",
-      "lead_email": "john@example.com",
-      "subject": "Quick question about 123 Oak Street",
-      "status": "opened",
-      "sent_at": "2026-01-30T10:30:00.000Z",
-      "opened_at": "2026-01-30T11:00:00.000Z",
-      "replied_at": null
+      "to_number": "+15551234567",
+      "body": "Hi John, following up on my email about 123 Oak Street...",
+      "status": "sent",
+      "twilio_sid": "SM1234567890abcdef",
+      "sent_at": "2026-02-15T14:30:00",
+      "created_at": "2026-02-15T14:30:00"
     }
   ]
 }
 ```
 
----
+**SMS status values:** `pending`, `sent`, `delivered`, `failed`, `undelivered`
 
-## POST `/api/campaigns/quick-start`
-
-**Purpose:** Create and start campaign in one call
-
-**Query Parameters:**
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| name | string | Yes | Campaign name |
-| lead_ids | string | Yes | Comma-separated lead IDs |
-| template_id | int | No* | Template ID to use |
-| subject | string | No* | Custom subject |
-| body | string | No* | Custom body |
-
-*Either `template_id` OR both `subject` and `body` required
-
-**Example Request:**
-```
-POST /api/campaigns/quick-start?name=Quick Test&lead_ids=1,2,3&template_id=1
-```
-
-**Response:** Same as `/start` endpoint
+**How to show in frontend:**
+- On the lead detail page, add an "SMS" tab showing a timeline of sent messages.
+- Each message shows: body text, status badge (green for sent/delivered, red for failed), timestamp.
 
 ---
 
-# Dashboard
+# 5. Voice Calls
 
-## GET `/api/dashboard`
+Outbound AI voice calls via Retell AI + Twilio SIP trunk. In demo mode, calls are logged as `status: "mock"`.
 
-**Purpose:** Get complete dashboard (stats + funnel + activity)
+---
 
-**Response:**
+## POST `/api/voice/call`
+
+Start an outbound AI voice call.
+
+**Request:**
 ```json
 {
-  "stats": {
-    "total_leads": 150,
-    "leads_by_status": {
-      "uploaded": 50,
-      "contacted": 60,
-      "replied": 20,
-      "interested": 12,
-      "booked": 5,
-      "closed": 3
-    },
-    "total_emails_sent": 180,
-    "emails_opened": 95,
-    "emails_replied": 25,
-    "emails_bounced": 5,
-    "open_rate": 52.78,
-    "reply_rate": 13.89,
-    "total_replies": 25,
-    "replies_by_sentiment": {
-      "interested": 12,
-      "not_now": 8,
-      "unsubscribe": 2,
-      "other": 3
-    },
-    "total_bookings": 8,
-    "upcoming_bookings": 3,
-    "emails_sent_today": 15,
-    "emails_sent_this_week": 45,
-    "replies_today": 3,
-    "bookings_this_week": 2
-  },
-  "funnel": {
-    "uploaded": 50,
-    "contacted": 60,
-    "replied": 20,
-    "interested": 12,
-    "booked": 5,
-    "closed": 3
-  },
-  "recent_activity": [
-    {
-      "type": "email_sent",
-      "lead_id": 45,
-      "lead_name": "John Doe",
-      "description": "Email sent: Quick question about 123 Oak...",
-      "timestamp": "2026-01-30T10:30:00.000Z"
-    },
-    {
-      "type": "reply_received",
-      "lead_id": 32,
-      "lead_name": "Jane Smith",
-      "description": "Reply received (interested)",
-      "timestamp": "2026-01-30T10:15:00.000Z"
-    },
-    {
-      "type": "booking_created",
-      "lead_id": 28,
-      "lead_name": "Bob Wilson",
-      "description": "Meeting scheduled for Feb 05 at 02:00 PM",
-      "timestamp": "2026-01-30T09:45:00.000Z"
-    }
-  ]
+  "lead_id": 1,
+  "dynamic_variables": {
+    "property_address": "123 Oak Street",
+    "caller_name": "Sarah from Outreach Team"
+  }
 }
 ```
 
----
-
-## GET `/api/dashboard/stats`
-
-**Purpose:** Get statistics only
-
-**Response:** `stats` object from full dashboard
-
----
-
-## GET `/api/dashboard/funnel`
-
-**Purpose:** Get lead funnel counts
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| lead_id | int | Yes | Lead to call. Must have a phone number. |
+| dynamic_variables | object | No | Extra variables injected into the Retell agent prompt. `first_name`, `last_name`, `company`, `address`, `property_type` are auto-filled from lead data — you only need to pass additional custom ones here. |
 
 **Response:**
 ```json
 {
-  "uploaded": 50,
-  "contacted": 60,
-  "replied": 20,
-  "interested": 12,
-  "booked": 5,
-  "closed": 3
+  "success": true,
+  "lead_id": 1,
+  "voice_call_id": 3,
+  "retell_call_id": "call_abc123def456",
+  "status": "calling",
+  "error": null,
+  "message": "Call initiated"
 }
 ```
 
----
-
-## GET `/api/dashboard/activity`
-
-**Purpose:** Get recent activity feed
-
-**Query Parameters:**
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| limit | int | 20 | Number of items |
-
-**Response:** Array of activity objects
+**How to show in frontend:**
+- On the lead detail page, add a "Start AI Call" button (only enabled if lead has phone).
+- Optionally show a modal where the user can add custom dynamic_variables before calling.
+- After initiating, show a "Call in progress..." indicator with a pulse animation.
+- Poll `GET /api/voice/call/{voice_call_id}` every 10-15 seconds to check if the call completed, then refresh the history.
 
 ---
 
-## GET `/api/dashboard/campaigns`
+## GET `/api/voice/history/{lead_id}`
 
-**Purpose:** Get campaigns overview
+Get all voice calls for a lead (newest first).
 
 **Response:**
 ```json
 {
-  "total": 5,
-  "by_status": {
-    "draft": 1,
-    "active": 2,
-    "completed": 2
-  },
-  "active_campaigns": [
+  "lead_id": 1,
+  "calls": [
     {
       "id": 3,
-      "name": "Q1 2026 Outreach",
-      "started_at": "2026-01-30T10:00:00.000Z"
+      "lead_id": 1,
+      "to_number": "+15551234567",
+      "retell_call_id": "call_abc123def456",
+      "retell_agent_id": "agent_xyz789",
+      "status": "completed",
+      "duration_seconds": 145,
+      "call_summary": "Lead expressed interest in selling. Wants a follow-up call next Tuesday.",
+      "call_outcome": "interested",
+      "transcript": "Agent: Hi John, this is Sarah...\nJohn: Oh hi, yes I got your email...",
+      "recording_url": "https://storage.retellai.com/recordings/abc123.wav",
+      "started_at": "2026-02-16T10:00:00",
+      "ended_at": "2026-02-16T10:02:25",
+      "created_at": "2026-02-16T10:00:00"
     }
   ]
 }
 ```
 
+**How to show in frontend:**
+- On the lead detail page, add a "Voice Calls" tab.
+- Each call shows: status badge, duration (format as "2m 25s"), outcome badge, summary text.
+- Expandable section for the full transcript.
+- If `recording_url` exists, show an audio player.
+- If `call_summary` exists, show it prominently as the AI's summary of what happened.
+
 ---
 
-## GET `/api/dashboard/quick`
+## GET `/api/voice/call/{call_id}`
 
-**Purpose:** Lightweight quick stats (fast loading)
+Get a single voice call by its database ID.
+
+**Response:** Same shape as a single item in the `calls` array above.
+
+**How to use:** Poll this after starting a call to check when it completes.
+
+---
+
+**Voice Call Status Values:**
+| Status | Meaning | Badge Color |
+|--------|---------|-------------|
+| pending | Queued | Gray |
+| calling | Ringing | Yellow |
+| in_progress | Conversation happening | Blue |
+| completed | Call finished | Green |
+| failed | Error occurred | Red |
+| no_answer | Lead didn't pick up | Orange |
+| busy | Line was busy | Orange |
+| voicemail | Went to voicemail | Purple |
+
+**Voice Call Outcome Values:**
+| Outcome | Meaning | Badge Color |
+|---------|---------|-------------|
+| booked | Meeting scheduled | Green |
+| interested | Lead showed interest | Blue |
+| not_interested | Lead declined | Red |
+| callback | Lead wants a callback | Yellow |
+| voicemail | Left a voicemail | Purple |
+| no_outcome | Inconclusive | Gray |
+
+---
+
+# 6. AI Weekly Insights
+
+## GET `/api/dashboard/insights`
+
+AI-generated weekly performance report. The LLM reads the last 7 days of data and produces a plain-English summary with highlights and actionable recommendations.
 
 **Response:**
 ```json
 {
-  "leads": 150,
-  "emails_sent": 180,
-  "replies": 25,
-  "bookings": 8
+  "period": "Feb 11 - Feb 18, 2026",
+  "summary": "This week you sent 45 emails with a 52.8% open rate and 13.9% reply rate. Your Tuesday sends got 2x more opens than Friday. Your shortest emails drove 80% of your replies.",
+  "highlights": [
+    "Total emails sent: 45",
+    "Open rate: 52.8% (up from 41.2% last week)",
+    "Reply rate: 13.9%",
+    "Top campaign: Q1 2026 Outreach",
+    "SMS messages sent: 12"
+  ],
+  "recommendations": [
+    "Double down on Tuesday/Wednesday sends — they consistently outperform.",
+    "Test shorter subject lines based on your A/B learnings.",
+    "Follow up with non-openers via SMS.",
+    "Consider voice calls for Hot-scored leads who haven't replied."
+  ],
+  "stats_snapshot": {
+    "emails_sent": 45,
+    "opens": 24,
+    "replies": 6,
+    "bookings": 2,
+    "open_rate": 52.8,
+    "reply_rate": 13.9,
+    "prev_week_open_rate": 41.2,
+    "prev_week_reply_rate": 10.0,
+    "top_campaign": "Q1 2026 Outreach",
+    "sms_sent": 12,
+    "voice_calls": 3
+  }
+}
+```
+
+**How to show in frontend:**
+- On the dashboard page, add a full-width "AI Insights" card.
+- Top: `period` as the card header ("Week of Feb 11 - Feb 18, 2026").
+- Middle: `summary` as a paragraph (the AI coach talking to the user).
+- Left column: `highlights` as bullet points with small metric badges from `stats_snapshot`.
+- Right column: `recommendations` as action items — show them with checkbox styling so it feels like a to-do list.
+- Include a "Refresh Insights" button that re-calls this endpoint.
+- Compare current vs previous week: show green/red arrows next to `open_rate` vs `prev_week_open_rate`.
+
+---
+
+# 7. Config Update
+
+The existing `GET /config` endpoint now returns additional service statuses.
+
+**Response (updated shape):**
+```json
+{
+  "app_name": "Real Estate Outreach API",
+  "version": "1.0.0",
+  "environment": "development",
+  "services": {
+    "database": true,
+    "sendgrid": false,
+    "twilio_sms": false,
+    "retell_voice": false,
+    "openai": true,
+    "calendly": false
+  },
+  "cors_origins": ["http://localhost:3000", "http://localhost:5173"]
+}
+```
+
+**How to use in frontend:**
+- Call `GET /config` on app load.
+- `services.openai === true` → show "AI-Powered" badges on scoring, generation, insights, chatbot.
+- `services.openai === false` → show "Demo Mode" badges instead (everything still works, just uses rule-based fallbacks).
+- `services.twilio_sms === true` → SMS is live. `false` → SMS works but messages are mocked.
+- `services.retell_voice === true` → Voice calls are live. `false` → Calls are mocked.
+- `services.sendgrid === true` → Emails actually send. `false` → Emails are logged only.
+
+---
+
+# 8. Demo Utilities
+
+These endpoints simulate events for testing when real services aren't connected. Useful for demoing the full pipeline.
+
+---
+
+## POST `/api/demo/simulate/open`
+
+Simulate a lead opening their most recent email.
+
+**Request:**
+```json
+{ "lead_id": 1 }
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Simulated email open for John Doe",
+  "lead_id": 1,
+  "email_sequence_id": 5,
+  "opened_at": "2026-02-18T10:00:00"
 }
 ```
 
 ---
 
-# Error Responses
+## POST `/api/demo/simulate/reply`
 
-## 400 Bad Request
+Simulate a lead replying to an email.
 
+**Request:**
 ```json
 {
-  "detail": "Error description here"
+  "lead_id": 1,
+  "sentiment": "interested",
+  "reply_text": "Yes, I'd love to chat about selling my property."
 }
 ```
 
-## 404 Not Found
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| lead_id | int | Yes | Lead who replies |
+| sentiment | string | No | `interested`, `not_now`, `unsubscribe`, `other`. Default: `interested` |
+| reply_text | string | No | Custom reply text. If omitted, auto-generated based on sentiment. |
 
+**Response:**
 ```json
 {
-  "detail": "Lead with ID 999 not found"
-}
-```
-
-## 422 Validation Error
-
-```json
-{
-  "detail": [
-    {
-      "loc": ["body", "email"],
-      "msg": "value is not a valid email address",
-      "type": "value_error.email"
-    }
-  ]
+  "success": true,
+  "message": "Simulated interested reply from John",
+  "lead_id": 1,
+  "lead_status": "interested",
+  "reply_id": 8,
+  "sentiment": "interested"
 }
 ```
 
 ---
 
-# Frontend Integration Tips
+## POST `/api/demo/simulate/booking`
 
-## Axios Example
+Simulate a lead booking a meeting.
+
+**Request:**
+```json
+{
+  "lead_id": 1,
+  "days_from_now": 3
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Simulated booking for John on February 21 at 02:00 PM",
+  "lead_id": 1,
+  "lead_status": "booked",
+  "booking_id": 4,
+  "scheduled_time": "2026-02-21T14:00:00"
+}
+```
+
+---
+
+## POST `/api/demo/seed`
+
+Seed database with 5 sample leads, 1 email template, and 1 draft campaign. Fails if data already exists (call reset first).
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Demo data seeded successfully",
+  "data": { "leads_created": 5, "templates_created": 1, "campaigns_created": 1 }
+}
+```
+
+---
+
+## POST `/api/demo/reset?confirm=true`
+
+Delete ALL data. Requires `?confirm=true` query parameter.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "All demo data has been reset. Upload new leads to start fresh."
+}
+```
+
+**How to show in frontend:**
+- Add a "Demo Controls" panel (collapsible, maybe in settings or a debug drawer).
+- Buttons: "Seed Data", "Simulate Open", "Simulate Reply", "Simulate Booking", "Reset All".
+- The simulate buttons should ask for a lead_id (dropdown of existing leads).
+- The reset button should have a confirmation dialog.
+
+---
+
+# 9. Webhooks
+
+These are backend-only — the frontend doesn't call them. But the frontend should display the data they produce.
+
+## POST `/webhooks/sendgrid/events`
+
+Receives email events from SendGrid: `open`, `click`, `bounce`, `spamreport`. Automatically updates `email_sequences` and `leads` tables.
+
+**Frontend impact:** After SendGrid processes events, the lead detail page will show updated `opened_at`, `clicked_at`, `replied_at` timestamps and status changes in the email history.
+
+## POST `/api/voice/webhook/retell`
+
+Receives voice call events from Retell AI: `call_ended`, `call_analyzed`. Automatically updates `voice_calls` with transcript, summary, recording URL, outcome, and duration.
+
+**Frontend impact:** After a call completes and Retell sends its webhook, the voice call history will show `transcript`, `call_summary`, `call_outcome`, `duration_seconds`, and `recording_url`. Poll the voice call endpoint to pick up these updates.
+
+---
+
+# 10. New Data Models & Status Values
+
+## Lead Score Priorities
+```
+Hot (75-100) → immediate aggressive outreach
+Warm (50-74) → nurture sequence
+Cold (25-49) → monthly check-in
+Dead (0-24)  → skip
+```
+
+## SMS Statuses
+```
+pending → sent → delivered
+              → failed
+              → undelivered
+```
+
+## Voice Call Statuses
+```
+pending → calling → in_progress → completed
+                                → failed
+                                → no_answer
+                                → busy
+                                → voicemail
+```
+
+## Voice Call Outcomes
+```
+booked | interested | not_interested | callback | voicemail | no_outcome
+```
+
+## Chatbot Next Actions
+```
+continue | book_meeting | escalate_human | end
+```
+
+## Psychological Triggers (Campaign Variations)
+```
+curiosity | urgency | social_proof | fear_of_missing_out | authority
+```
+
+---
+
+# 11. Frontend Integration Guide
+
+## New Axios Functions to Add
 
 ```javascript
-import axios from 'axios';
+// AI Lead Scoring
+export const scoreLead = (leadId, icpDescription = null) =>
+  api.post('/api/leads/score', { lead_id: leadId, icp_description: icpDescription });
 
-const api = axios.create({
-  baseURL: 'http://localhost:8000',
-  headers: {
-    'Content-Type': 'application/json'
-  }
-});
+export const scoreBulkLeads = (leadIds, icpDescription = null) =>
+  api.post('/api/leads/score/bulk', { lead_ids: leadIds, icp_description: icpDescription });
 
-// Get leads
-const getLeads = async (page = 1, status = null) => {
-  const params = { page, per_page: 20 };
-  if (status) params.status = status;
-  const response = await api.get('/api/leads', { params });
-  return response.data;
-};
+// AI Campaign Generation
+export const generateVariations = (campaignId, brief) =>
+  api.post(`/api/campaigns/${campaignId}/generate`, brief);
 
-// Upload CSV
-const uploadCSV = async (file) => {
-  const formData = new FormData();
-  formData.append('file', file);
-  const response = await api.post('/api/leads/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
-  });
-  return response.data;
-};
+export const getVariations = (campaignId) =>
+  api.get(`/api/campaigns/${campaignId}/variations`);
 
-// Start campaign
-const startCampaign = async (campaignId, leadIds, templateId) => {
-  const response = await api.post(`/api/campaigns/${campaignId}/start`, {
-    lead_ids: leadIds,
-    email_template_id: templateId
-  });
-  return response.data;
-};
+export const analyzeABTest = (campaignId) =>
+  api.post(`/api/campaigns/${campaignId}/analyze`);
 
-// Get dashboard
-const getDashboard = async () => {
-  const response = await api.get('/api/dashboard');
-  return response.data;
-};
+// Chatbot
+export const sendChatMessage = (leadId, messages, context = {}) =>
+  api.post('/api/chatbot/message', { lead_id: leadId, messages, ...context });
+
+export const getChatHistory = (leadId) =>
+  api.get(`/api/chatbot/history/${leadId}`);
+
+// SMS
+export const sendSMS = (leadId, body, personalize = true) =>
+  api.post('/api/sms/send', { lead_id: leadId, body, personalize });
+
+export const getSMSHistory = (leadId) =>
+  api.get(`/api/sms/history/${leadId}`);
+
+// Voice
+export const startVoiceCall = (leadId, dynamicVars = null) =>
+  api.post('/api/voice/call', { lead_id: leadId, dynamic_variables: dynamicVars });
+
+export const getVoiceHistory = (leadId) =>
+  api.get(`/api/voice/history/${leadId}`);
+
+export const getVoiceCall = (callId) =>
+  api.get(`/api/voice/call/${callId}`);
+
+// AI Insights
+export const getInsights = () => api.get('/api/dashboard/insights');
+
+// Config (check which services are live)
+export const getConfig = () => api.get('/config');
+
+// Demo utilities
+export const simulateOpen = (leadId) =>
+  api.post('/api/demo/simulate/open', { lead_id: leadId });
+
+export const simulateReply = (leadId, sentiment = 'interested') =>
+  api.post('/api/demo/simulate/reply', { lead_id: leadId, sentiment });
+
+export const simulateBooking = (leadId, daysFromNow = 3) =>
+  api.post('/api/demo/simulate/booking', { lead_id: leadId, days_from_now: daysFromNow });
+
+export const seedData = () => api.post('/api/demo/seed');
+export const resetData = () => api.post('/api/demo/reset?confirm=true');
 ```
+
+## New UI Components Needed
+
+1. **Lead Score Card** — score number (big), priority badge (colored), reasoning text, recommended campaign chip, personalization hints.
+
+2. **Bulk Score Button** — on leads table, "Score All with AI" button → ICP input modal → progress indicator → results update table.
+
+3. **AI Campaign Generator** — form (target_audience, goal, pain_point, tone) → 5-tab variation viewer → edit capability → "Use for Campaign" button.
+
+4. **Variation Comparison Table** — columns: label, subject, sends, opens, open_rate, clicks, replies, reply_rate, winner badge. Progress bars for rates.
+
+5. **A/B Analysis Card** — winner announcement, explanation paragraph, pattern learned callout, bar chart of all variations.
+
+6. **Chat Widget** — message bubbles (user right, bot left), CTA buttons based on next_action, message input with send button.
+
+7. **SMS Compose Modal** — text area with placeholder insertion buttons, character counter (max 1600), send button.
+
+8. **SMS History Timeline** — chronological list of messages with status badges.
+
+9. **Voice Call Section** — "Start AI Call" button, call status indicator with pulse animation, call history cards with summary/outcome/duration, expandable transcript, audio player for recordings.
+
+10. **AI Insights Card** — period header, summary paragraph, highlights bullets, recommendations checklist, stat comparison badges with arrows.
+
+11. **Demo Controls Panel** — collapsible panel with simulate/seed/reset buttons.
+
+12. **Service Status Indicators** — green/yellow dots from `/config` showing which services are live vs demo.
 
 ---
 
-*Documentation Generated: January 30, 2026*
+*New Endpoints Total: 18 (Lead Scoring 2, Campaign AI 3, Chatbot 2, SMS 2, Voice 3, Insights 1, Demo 5)*
+
+*Documentation Generated: February 18, 2026*

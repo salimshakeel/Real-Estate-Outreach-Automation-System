@@ -43,3 +43,9 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local SQLite (dev/demo only; Render uses Postgres)
+*.db
+
+# Optional: uncomment if "backend by client" is a local copy only
+# backend by client /
