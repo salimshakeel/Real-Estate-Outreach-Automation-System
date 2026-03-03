@@ -3,7 +3,7 @@ Chatbot Router
 Endpoints for the AI-powered sales assistant (chatbot)
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,12 @@ from app.schemas import (
 from app.utils.ai_service import ai_service
 
 router = APIRouter()
+
+
+@router.options("/message")
+async def chatbot_message_options() -> Response:
+    """Handle CORS preflight for chatbot message endpoint."""
+    return Response(status_code=200)
 
 
 @router.post("/message", response_model=ChatbotResponse)
